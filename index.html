@@ -412,12 +412,71 @@ function loadFromFirebase(cb) {
 }
 
 function startFirebaseListeners() {
-  // Real-time orders sync
+  var user = getCurrentUser();
+  var isAdmin = user && (user.role==='superadmin'||user.role==='admin'||user.role==='entreprise');
+
+  // Real-time orders sync - with status change detection
   db.ref('data/ba_orders').on('value', function(snap){
     var v = snap.val();
-    if (v !== null) try { localStorage.setItem('_ba_ba_orders', JSON.stringify(v)); } catch(e) {}
+    if (v === null) return;
+    var newOrders = Array.isArray(v) ? v : Object.values(v);
+    var oldOrdersStr = localStorage.getItem('_ba_ba_orders');
+    var oldOrders = oldOrdersStr ? JSON.parse(oldOrdersStr) : [];
+
+    // Detect status changes for current client
+    if (user && !isAdmin) {
+      newOrders.forEach(function(newO) {
+        if (!newO || newO.userId !== user.id) return;
+        var oldO = oldOrders.find(function(o){ return o.id === newO.id; });
+        if (oldO && oldO.status !== newO.status) {
+          // Status changed!
+          if (newO.status === 'ready') {
+            showOrderReadyAlert(newO);
+          } else if (newO.status === 'confirmed' || newO.status === 'preparing') {
+            var msgs = {
+              confirmed: '✅ Commande n°'+newO.orderNumber+' confirmee !',
+              preparing: '👨‍🍳 Votre commande n°'+newO.orderNumber+' est en preparation !'
+            };
+            toast(msgs[newO.status]||'Statut mis a jour', 'info', 5000);
+            sendPushNotif('Break Antillais', msgs[newO.status]||'Statut mis a jour');
+          }
+        }
+      });
+    }
+
+    // Detect new orders for admin
+    if (isAdmin && _adminAlertEnabled) {
+      var newPending = newOrders.filter(function(o){ return o && o.status==='pending'; });
+      var oldPending = oldOrders.filter(function(o){ return o && o.status==='pending'; });
+      if (_lastOrderCount >= 0 && newPending.length > oldPending.length) {
+        var added = newPending.filter(function(no){
+          return !oldPending.find(function(oo){ return oo.id===no.id; });
+        });
+        added.forEach(function(o){
+          playAdminAlert();
+          showNewOrderBanner(o);
+          sendPushNotif('🆕 Nouvelle commande !', 'N°'+o.orderNumber+' — '+o.userPrenom+' — '+fmt(o.total));
+        });
+      }
+      _lastOrderCount = newPending.length;
+    }
+
+    // Save to cache
+    try { localStorage.setItem('_ba_ba_orders', JSON.stringify(newOrders)); } catch(e) {}
+
+    // Refresh UI if on relevant screen
+    if (currentScreen === 'orders' && !isAdmin) renderOrders();
+    if (currentScreen === 'profile' && isAdmin) {
+      var ac = document.getElementById('admin-content');
+      var activeTab = document.querySelector('.admin-tab.active');
+      if (ac && activeTab) {
+        if (activeTab.textContent.indexOf('Commandes') >= 0) ac.innerHTML = adminOrders();
+        if (activeTab.textContent.indexOf('Dashboard') >= 0) ac.innerHTML = adminDashboard();
+      }
+    }
   });
-  // Real-time users sync - merge both formats
+
+  // Real-time users sync
   var mergeUsers = function() {
     var mergedUsers = {};
     db.ref('data/ba_users').once('value').then(function(s1){
@@ -1373,13 +1432,14 @@ function renderCart() {
     +'<span class="font-head fw-800" style="font-size:1.2rem">Mon panier</span>'
     +'<button class="btn btn-danger btn-sm" onclick="clearCart()">🗑 Vider</button></div>';
   cart.forEach(function(item){
-    html+='<div class="cart-item">'
-      +'<div style="font-size:1.8rem;flex-shrink:0">'+(EMOJI[item.cat]||'🍽')+'</div>'
+    var isReward = item.isReward;
+    html+='<div class="cart-item" style="'+(isReward?'background:rgba(45,158,95,.05);border-radius:var(--radius-sm);padding:.6rem':'')+'">'
+      +'<div style="font-size:1.8rem;flex-shrink:0">'+(isReward?'🎁':(EMOJI[item.cat]||'🍽'))+'</div>'
       +'<div style="flex:1"><div class="cart-item-name">'+item.name+'</div>'
       +(item.details?'<div class="cart-item-detail">'+item.details+'</div>':'')
       +'</div><div style="display:flex;align-items:center;gap:.65rem">'
-      +'<span class="cart-item-price">'+fmt(item.price)+'</span>'
-      +'<button style="width:26px;height:26px;border-radius:50%;background:rgba(212,175,55,.15);border:none;color:var(--gold);cursor:pointer;font-size:.75rem" data-cid="'+item.id+'" onclick="editCartItem(this.dataset.cid)">✏️</button>'
+      +'<span class="cart-item-price" style="'+(isReward?'color:#2d9e5f':'')+'">'+( isReward?'Offert':fmt(item.price))+'</span>'
+      +(!isReward?'<button style="width:26px;height:26px;border-radius:50%;background:rgba(212,175,55,.15);border:none;color:var(--gold);cursor:pointer;font-size:.75rem" data-cid="'+item.id+'" onclick="editCartItem(this.dataset.cid)">✏️</button>':'')
       +'<button style="width:26px;height:26px;border-radius:50%;background:rgba(200,35,43,.15);border:none;color:var(--red);cursor:pointer" data-cid="'+item.id+'" onclick="removeFromCart(this.dataset.cid)">✕</button>'
       +'</div></div>';
   });
@@ -1896,15 +1956,33 @@ function renderProfile(){
     +'</div>';
   // Paliers
   html+='<div class="sec-title" style="margin-top:1.25rem">Programme Fidelite</div>';
+  // ── Récompenses disponibles ──
   var _palList=load('ba_paliers',PALIERS);
+  var rewardsAvailable = _palList.filter(function(p){ return pts>=p.min && p.reward && p.name!=='Bronze'; });
+  if (rewardsAvailable.length > 0) {
+    html += '<div class="sec-title" style="margin-top:1.25rem">🎁 Mes recompenses disponibles</div>';
+    rewardsAvailable.forEach(function(p){
+      html += '<div style="background:linear-gradient(135deg,rgba(45,158,95,.12),rgba(45,158,95,.06));border:1.5px solid rgba(45,158,95,.35);border-radius:var(--radius);padding:1rem;margin-bottom:.5rem;display:flex;align-items:center;gap:.85rem">'
+        +'<span style="font-size:2rem">'+p.icon+'</span>'
+        +'<div style="flex:1">'
+        +'<div class="fw-700" style="color:#2d9e5f">'+p.reward+'</div>'
+        +'<div class="text-sm text-muted">Palier '+p.name+' atteint ✓</div>'
+        +'</div>'
+        +'<button class="btn btn-primary btn-sm" data-reward="'+p.reward+'" data-palier="'+p.name+'" onclick="addRewardToCart(this.dataset.reward, this.dataset.palier)" style="white-space:nowrap">+ Panier</button>'
+        +'</div>';
+    });
+  }
+
+  // ── Tous les paliers ──
+  html += '<div class="sec-title" style="margin-top:1.25rem">Programme Fidelite</div>';
   _palList.forEach(function(p){
     var active=palier.name===p.name;
     var done=pts>=p.min;
     html+='<div style="display:flex;align-items:center;gap:.75rem;padding:.8rem .9rem;background:'+(active?'rgba(200,35,43,.08)':'var(--dark3)')+';border:1.5px solid '+(active?'var(--red)':'var(--border)')+';border-radius:var(--radius-sm);margin-bottom:.4rem">'
       +'<span style="font-size:1.5rem">'+p.icon+'</span>'
       +'<div style="flex:1"><div class="fw-700" style="color:'+p.color+'">'+p.name+'</div>'
-      +(p.reward?'<div class="text-sm" style="color:#2d9e5f">🎁 '+p.reward+'</div>':''  )
-      +'<div class="text-sm text-muted">'+p.min+(p.max<99999?' - '+p.max:'+')+' pts</div></div>'
+      +(p.reward?'<div class="text-sm" style="color:#2d9e5f">🎁 '+p.reward+'</div>':'')
+      +'<div class="text-sm text-muted">'+p.min+(p.max<99999?' - '+p.max:'+')+'  pts</div></div>'
       +(done?'<span style="color:#2d9e5f;font-weight:700;font-size:.82rem">✓ Atteint</span>'
              :'<span class="text-muted text-sm">'+Math.max(0,p.min-pts)+' pts</span>')
       +'</div>';
@@ -3349,6 +3427,35 @@ function checkBirthdayOffer(user) {
 }
 
 // SHOW REFERRAL CODE IN PROFILE
+function addRewardToCart(reward, palierName) {
+  var user = getCurrentUser();
+  if (!user) return;
+
+  // Check if reward already in cart
+  var alreadyIn = cart.find(function(i){ return i.isReward && i.rewardPalier===palierName; });
+  if (alreadyIn) {
+    toast('Cette recompense est deja dans votre panier','warning'); return;
+  }
+
+  // Map reward to product
+  var rewardItem = {
+    id: genId(),
+    pid: 'reward-'+palierName,
+    name: reward,
+    price: 0,
+    cat: 'reward',
+    details: 'Recompense palier '+palierName,
+    qty: 1,
+    isReward: true,
+    rewardPalier: palierName
+  };
+
+  cart.push(rewardItem);
+  updateBadges();
+  toast('🎁 '+reward+' ajoute au panier !','success', 4000);
+  go('cart');
+}
+
 function getReferralSection(user) {
   if (!user.referralCode) return '';
   return '<div class="sec-title" style="margin-top:1.25rem">🤝 Parrainage</div>'
