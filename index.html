@@ -383,27 +383,23 @@ function saveUserToFirebase(user) {
 }
 
 function loadFromFirebase(cb) {
-  // Load both flat data and individual users
-  var promises = [
-    db.ref('data').once('value'),
-    db.ref('data/users').once('value')
-  ];
-  Promise.all(promises).then(function(results) {
-    var d = results[0].val();
-    if (d) {
-      Object.keys(d).forEach(function(k){
-        if (k === 'users') return; // handled separately
-        try { localStorage.setItem('_ba_'+k, JSON.stringify(d[k])); } catch(e) {}
-      });
-    }
-    // Merge individual users into ba_users array
-    var usersObj = results[1].val();
+  db.ref('data/users').once('value').then(function(snap) {
+    var usersObj = snap.val();
     if (usersObj) {
       var usersArr = Object.values(usersObj);
       try { localStorage.setItem('_ba_ba_users', JSON.stringify(usersArr)); } catch(e) {}
     }
+    return db.ref('data').once('value');
+  }).then(function(snap) {
+    var d = snap.val();
+    if (d) {
+      Object.keys(d).forEach(function(k){
+        if (k === 'users') return;
+        try { localStorage.setItem('_ba_'+k, JSON.stringify(d[k])); } catch(e) {}
+      });
+    }
     cb();
-  }).catch(function(){ cb(); });
+  }).catch(function(e){ console.warn('Firebase load error:', e); cb(); });
 }
 
 function startFirebaseListeners() {
@@ -1065,6 +1061,7 @@ function openProduct(id) {
 
   var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
     +'<div class="modal" style="max-height:92vh"><div class="modal-handle"></div>'
+    +'<button onclick="closeModal(&apos;m-product&apos;)" style="background:none;border:none;color:var(--muted);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;margin-bottom:.75rem;padding:0">← Retour</button>'
     +'<div style="text-align:center;font-size:2.8rem;margin-bottom:.4rem">'+(EMOJI[p.cat]||'🍽')+'</div>'
     +'<h2 class="modal-title text-center">'+p.name+'</h2>'
     +'<div style="text-align:center;font-family:var(--head);font-size:1.35rem;font-weight:800;color:var(--gold);margin-bottom:.4rem" id="modal-main-price">'+(p.isClassique?'—':fmt(p.price))+'</div>'
@@ -1142,7 +1139,7 @@ function openProduct(id) {
 
   html += '<div class="form-group mt-1"><label class="form-label">📝 Note cuisine (optionnel)</label>'
     +'<input class="form-input" id="prod-note" placeholder="Ex: sans oignon, extra sauce..."/></div>'
-    +'<button onclick="closeModal(&apos;m-product&apos;)" style="background:none;border:none;color:var(--muted);font-size:.82rem;cursor:pointer;padding:.25rem 0;display:flex;align-items:center;gap:.3rem;margin-bottom:.25rem">← Retour au menu</button>'
+
     +'<div style="display:flex;align-items:center;gap:.75rem;margin-top:.75rem">'
     +'<div style="font-family:var(--head);font-weight:800;font-size:1.2rem;color:var(--gold);background:var(--dark3);border:1.5px solid rgba(212,175,55,.25);border-radius:var(--radius-sm);padding:.65rem .9rem;white-space:nowrap" id="cart-btn-price">'+(p.isClassique?'—':fmt(p.price))+'</div>'
     +'<div style="display:flex;align-items:center;gap:.5rem">'
@@ -2256,7 +2253,7 @@ function adminStats(){
   var done=orders.filter(function(o){return o.status==='picked_up';});
   var revenue=done.reduce(function(s,o){return s+o.total;},0);
   var avg=done.length?revenue/done.length:0;
-  var clients=getUsers().filter(function(u){return u.role!=='admin'&&u.role!=='superadmin'&&u.role!=='entreprise';});
+  var clients=getUsers().filter(function(u){var r=u.role||'client';return r==='client'||r==='';});
   var freq={};
   done.forEach(function(o){o.items.forEach(function(i){freq[i.name]=(freq[i.name]||0)+1;});});
   var top=Object.entries(freq).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
@@ -2281,7 +2278,10 @@ function adminStats(){
 function adminLoyalty(){
   var cfg=getCfg();
   var paliers=load('ba_paliers', PALIERS);
-  var clients=getUsers().filter(function(u){return u.role!=='admin'&&u.role!=='superadmin'&&u.role!=='entreprise';}).sort(function(a,b){return(b.points||0)-(a.points||0);});
+  var clients=getUsers().filter(function(u){
+    var r=u.role||'client';
+    return r==='client'||r==='';
+  }).sort(function(a,b){return(b.points||0)-(a.points||0);});
   var html='<div style="padding:0 .9rem">';
 
   // ── MESSAGING ──
@@ -2474,7 +2474,7 @@ function updateMsgPreview() {
 }
 
 function getFilteredClients(target) {
-  var allClients = getUsers().filter(function(u){ return u.role==='client' || !u.role; });
+  var allClients = getUsers().filter(function(u){ return !u.role || u.role==='client'; });
   var now = new Date();
   if (target === 'all') return allClients;
   if (target === 'inactive' || target === 'inactive30') {
