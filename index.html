@@ -1077,8 +1077,9 @@ function openProduct(id) {
   var needsConfig = ['bokit','crepe_salee','agoulou'].indexOf(p.cat)>=0;
 
   var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
-    +'<div class="modal" style="max-height:92vh"><div class="modal-handle"></div>'
-    +'<button onclick="closeModal(&apos;m-product&apos;)" style="background:none;border:none;color:var(--muted);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;margin-bottom:.75rem;padding:0">← Retour</button>'
+    +'<div class="modal" style="max-height:92vh;position:relative"><div class="modal-handle"></div>'
+    +'<button onclick="closeModal(&apos;m-product&apos;)" style="position:absolute;top:.75rem;left:1rem;background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .7rem;border-radius:100px;font-weight:600;z-index:10">← Retour</button>'
+    +'<div style="height:2rem"></div>'
     +'<div style="text-align:center;font-size:2.8rem;margin-bottom:.4rem">'+(EMOJI[p.cat]||'🍽')+'</div>'
     +'<h2 class="modal-title text-center">'+p.name+'</h2>'
     +'<div style="text-align:center;font-family:var(--head);font-size:1.35rem;font-weight:800;color:var(--gold);margin-bottom:.4rem" id="modal-main-price">'+(p.isClassique?'—':fmt(p.price))+'</div>'
@@ -1577,8 +1578,14 @@ function confirmOrder(){
   var total=cart.reduce(function(s,i){return s+i.price*i.qty;},0);
   var orders=getOrders();
   var num=String(orders.length+1).padStart(4,'0');
-  var discount = _selectedReduction ? _selectedReduction.discount : 0;
+  var discount = _selectedReduction ? (_selectedReduction.discount||0) : 0;
   var finalTotal = Math.max(0, total - discount);
+  // Mark promo as used
+  if (_selectedReduction && _selectedReduction.type === 'promo') {
+    var promos = load('ba_promos', []);
+    var pi = promos.findIndex(function(p){ return p.id === _selectedReduction.promoId; });
+    if (pi >= 0) { promos[pi].used = true; save('ba_promos', promos); }
+  }
   var order={
     id:genId(),orderNumber:num,userId:user.id,userPrenom:user.prenom,userPhone:user.phone,
     items:cart.slice(),total:finalTotal,originalTotal:total,
@@ -2401,18 +2408,17 @@ function adminLoyalty(){
 
   // Classement
   html+='<div class="sec-title">Classement clients</div>';
+  html += '<div class="form-group" style="margin-bottom:.75rem">'
+    +'<input class="form-input" id="client-search" placeholder="🔍 Rechercher un client..." oninput="filterClients(this.value)" style="background:var(--dark3)"/></div>';
+  html += '<div id="clients-list">';
   if(!clients.length){
     html+='<p class="text-sm text-muted">Aucun client inscrit</p>';
   } else {
-    clients.slice(0,20).forEach(function(u,i){
-      html+='<div style="display:flex;align-items:center;gap:.65rem;padding:.55rem .75rem;background:var(--dark3);border-radius:8px;margin-bottom:.35rem">'
-        +'<div class="fw-700 text-red" style="min-width:22px">#'+(i+1)+'</div>'
-        +'<div class="avatar" style="width:30px;height:30px;font-size:.78rem">'+u.prenom[0]+'</div>'
-        +'<div style="flex:1"><div class="fw-700 text-sm">'+u.prenom+'</div><div class="text-sm text-muted">'+u.email+'</div></div>'
-        +'<div class="fw-700 text-gold">'+(u.points||0)+' pts</div>'
-        +'<button class="btn btn-secondary btn-sm" data-uid="'+u.id+'" onclick="adjPts(this.dataset.uid)" style="font-size:.68rem;padding:.28rem .5rem">✏️</button></div>';
+    clients.slice(0,50).forEach(function(u,i){
+      html+=clientRow(u, i+1);
     });
   }
+  html += '</div>';
   return html+'</div>';
 }
 function savePtsCfg(){
@@ -2571,6 +2577,35 @@ function checkAutoRelance() {
     notify(u.id, cfg.title || 'On vous manque !', cfg.msg || 'Revenez commander chez Break Antillais !');
     save('ba_relance_sent_'+u.id, now.toISOString());
   });
+}
+
+function clientRow(u, rank) {
+  var p = getPalier(u.points||0);
+  return '<div style="display:flex;align-items:center;gap:.65rem;padding:.55rem .75rem;background:var(--dark3);border-radius:8px;margin-bottom:.35rem">'
+    +'<div class="fw-700 text-red" style="min-width:22px">#'+rank+'</div>'
+    +'<div class="avatar" style="width:30px;height:30px;font-size:.78rem">'+u.prenom[0].toUpperCase()+'</div>'
+    +'<div style="flex:1">'
+    +'<div class="fw-700 text-sm">'+u.prenom+'</div>'
+    +'<div style="font-size:.68rem;color:var(--muted)">'+u.email+'</div>'
+    +'<div style="font-size:.68rem;color:'+p.color+'">'+p.icon+' '+p.name+'</div>'
+    +'</div>'
+    +'<div class="fw-700 text-gold" style="font-size:.85rem">'+(u.points||0)+' pts</div>'
+    +'<button class="btn btn-secondary btn-sm" data-uid="'+u.id+'" onclick="adjPts(this.dataset.uid)" style="font-size:.68rem;padding:.28rem .5rem">✏️</button>'
+    +'</div>';
+}
+
+function filterClients(query) {
+  var allClients = getUsers().filter(function(u){
+    var r = u.role||'client'; return r==='client'||r==='';
+  }).sort(function(a,b){ return (b.points||0)-(a.points||0); });
+  var q = query.toLowerCase().trim();
+  var filtered = q ? allClients.filter(function(u){
+    return u.prenom.toLowerCase().includes(q) || (u.email||'').toLowerCase().includes(q) || (u.phone||'').includes(q);
+  }) : allClients;
+  var list = document.getElementById('clients-list');
+  if (!list) return;
+  if (!filtered.length) { list.innerHTML = '<p class="text-sm text-muted">Aucun resultat</p>'; return; }
+  list.innerHTML = filtered.slice(0,50).map(function(u,i){ return clientRow(u, i+1); }).join('');
 }
 
 function adjPts(uid){
@@ -3048,37 +3083,49 @@ function togglePtsReduction(id) {
   var user = getCurrentUser();
   if (!user) return;
   var total = cart.reduce(function(s,i){return s+i.price*i.qty;},0);
-  var palier = getPalier(user.points||0);
-  var reductions = getPointsReductions(user.points||0, palier, total);
-  var r = reductions.find(function(x){return x.id===id;});
-  if (!r) return;
-  if (_selectedReduction && _selectedReduction.id === id) {
-    // Deselect
-    _selectedReduction = null;
-    document.getElementById('pts-opt-'+id).style.borderColor = 'var(--border)';
-    document.getElementById('pts-check-'+id).style.background = 'transparent';
-  } else {
-    // Deselect previous
-    if (_selectedReduction) {
-      var prev = document.getElementById('pts-opt-'+_selectedReduction.id);
-      var prevCheck = document.getElementById('pts-check-'+_selectedReduction.id);
-      if(prev) prev.style.borderColor='var(--border)';
-      if(prevCheck) prevCheck.style.background='transparent';
-    }
-    _selectedReduction = r;
-    document.getElementById('pts-opt-'+id).style.borderColor = 'var(--gold)';
-    document.getElementById('pts-check-'+id).style.background = 'var(--gold)';
+
+  // Build full list of available options
+  var palierList = load('ba_paliers', PALIERS);
+  var curPalier = getPalier(user.points||0);
+  var curPalierFull = palierList.find(function(p){ return p.name===curPalier.name; });
+  var allOptions = [];
+
+  // Palier reward
+  if (curPalierFull && curPalierFull.reward && curPalier.name !== 'Bronze') {
+    allOptions.push({id:'palier', label:curPalierFull.reward, pts:0, discount:0, type:'palier', reward:curPalierFull.reward});
   }
-  // Update total display
-  var finalTotal = _selectedReduction ? Math.max(0, total - _selectedReduction.discount) : total;
-  var totalEl = document.querySelector('#m-product .modal [style*="font-weight:800"]:last-of-type');
-  // Recalculate confirm button display
-  var totalDisp = document.querySelectorAll('#m-product .modal span');
-  totalDisp.forEach(function(el){
-    if(el.style.color && el.style.color.indexOf('gold')>=0 || el.textContent.includes('€')){
-      // Update the total span
-    }
+  // Active promos
+  var promos = load('ba_promos',[]).filter(function(p){
+    return p.userId===user.id && !p.used && new Date(p.expiresAt)>new Date();
   });
+  promos.forEach(function(p){
+    allOptions.push({id:'promo-'+p.id, label:p.title, pts:0, discount:0, type:'promo', promoId:p.id});
+  });
+  // Points reduction
+  getPointsReductions(user.points||0, curPalier, total).forEach(function(r){ allOptions.push(r); });
+
+  var opt = allOptions.find(function(x){return x.id===id;});
+  if (!opt) return;
+
+  // Deselect previous
+  if (_selectedReduction) {
+    var prevEl = document.getElementById('pts-opt-'+_selectedReduction.id);
+    var prevCk = document.getElementById('pts-check-'+_selectedReduction.id);
+    if (prevEl) { prevEl.style.borderColor='var(--border)'; prevEl.style.background=''; }
+    if (prevCk) { prevCk.style.background='transparent'; }
+  }
+
+  if (_selectedReduction && _selectedReduction.id === id) {
+    _selectedReduction = null;
+  } else {
+    _selectedReduction = opt;
+    var el = document.getElementById('pts-opt-'+id);
+    var ck = document.getElementById('pts-check-'+id);
+    if (el) { el.style.borderColor='var(--gold)'; el.style.background='rgba(212,175,55,.08)'; }
+    if (ck) { ck.style.background='var(--gold)'; }
+    if (opt.type === 'palier') toast('🎁 '+opt.reward+' sera applique a votre commande !','success', 3000);
+    if (opt.type === 'promo') toast('🎁 Offre appliquee !','success', 3000);
+  }
 }
 
 // FAVORIS
