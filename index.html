@@ -492,6 +492,21 @@ function startFirebaseListeners() {
   };
   db.ref('data/users').on('value', function(){ mergeUsers(); });
   db.ref('data/ba_users').on('value', function(){ mergeUsers(); });
+
+  // Listen for real-time notifications for current client
+  if (user && !isAdmin) {
+    db.ref('notifs/'+user.id).on('child_added', function(snap) {
+      var notif = snap.val();
+      if (!notif) return;
+      // Only show if recent (last 30 seconds) to avoid showing old notifs on load
+      var age = (Date.now() - new Date(notif.at).getTime()) / 1000;
+      if (age < 30) {
+        toast(notif.title + ': ' + notif.body, 'info', 6000);
+        sendPushNotif(notif.title, notif.body);
+        if (navigator.vibrate) navigator.vibrate([200]);
+      }
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════════
@@ -692,13 +707,16 @@ function notify(userId, title, body) {
   var u = users.find(function(x){ return x.id === userId; });
   if (!u) return;
   if (!u.notifs) u.notifs = [];
-  u.notifs.unshift({id:genId(), title:title, body:body, read:false, at:new Date().toISOString()});
+  var notif = {id:genId(), title:title, body:body, read:false, at:new Date().toISOString()};
+  u.notifs.unshift(notif);
   if (u.notifs.length > 50) u.notifs = u.notifs.slice(0,50);
   saveUser(u);
+  // Write to dedicated real-time notifs path in Firebase
+  db.ref('notifs/'+userId+'/'+notif.id).set(notif).catch(function(e){});
+  // If current user, show immediately
   var cur = getCurrentUser();
   if (cur && cur.id === userId) {
     toast(title + ': ' + body, 'info', 5000);
-    // Send push notification
     sendPushNotif(title, body);
   }
 }
@@ -1968,7 +1986,7 @@ function renderProfile(){
         +'<div class="fw-700" style="color:#2d9e5f">'+p.reward+'</div>'
         +'<div class="text-sm text-muted">Palier '+p.name+' atteint ✓</div>'
         +'</div>'
-        +'<button class="btn btn-primary btn-sm" data-reward="'+p.reward+'" data-palier="'+p.name+'" onclick="addRewardToCart(this.dataset.reward, this.dataset.palier)" style="white-space:nowrap">+ Panier</button>'
+        +'<button class="btn btn-primary btn-sm" data-palier="'+p.name+'" onclick="addRewardToCartByPalier(this.dataset.palier)" style="white-space:nowrap">+ Panier</button>'
         +'</div>';
     });
   }
@@ -3428,31 +3446,35 @@ function checkBirthdayOffer(user) {
 
 // SHOW REFERRAL CODE IN PROFILE
 function addRewardToCart(reward, palierName) {
+  addRewardToCartByPalier(palierName);
+}
+
+function addRewardToCartByPalier(palierName) {
   var user = getCurrentUser();
-  if (!user) return;
+  if (!user) { toast('Connectez-vous pour utiliser vos recompenses','warning'); return; }
 
   // Check if reward already in cart
   var alreadyIn = cart.find(function(i){ return i.isReward && i.rewardPalier===palierName; });
-  if (alreadyIn) {
-    toast('Cette recompense est deja dans votre panier','warning'); return;
-  }
+  if (alreadyIn) { toast('Cette recompense est deja dans votre panier','warning'); return; }
 
-  // Map reward to product
-  var rewardItem = {
+  // Find reward for this palier
+  var paliers = load('ba_paliers', PALIERS);
+  var pal = paliers.find(function(p){ return p.name===palierName; });
+  if (!pal || !pal.reward) { toast('Recompense introuvable','error'); return; }
+
+  cart.push({
     id: genId(),
     pid: 'reward-'+palierName,
-    name: reward,
+    name: pal.reward,
     price: 0,
     cat: 'reward',
     details: 'Recompense palier '+palierName,
     qty: 1,
     isReward: true,
     rewardPalier: palierName
-  };
-
-  cart.push(rewardItem);
+  });
   updateBadges();
-  toast('🎁 '+reward+' ajoute au panier !','success', 4000);
+  toast('🎁 '+pal.reward+' ajoute au panier !','success', 4000);
   go('cart');
 }
 
