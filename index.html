@@ -424,6 +424,7 @@ function loadFromFirebase(cb) {
 function startFirebaseListeners() {
   var user = getCurrentUser();
   var isAdmin = user && (user.role==='superadmin'||user.role==='admin'||user.role==='entreprise');
+  console.log('[Firebase] Starting listeners, user:', user ? user.prenom : 'none', 'isAdmin:', isAdmin);
 
   // Real-time orders sync - with status change detection
   db.ref('data/ba_orders').on('value', function(snap){
@@ -875,6 +876,8 @@ function doLogin() {
   renderHome();
   checkBirthdayOffer(user);
   requestNotifPermission();
+  // Attach notification listener for this user
+  attachClientNotifListener(user);
   toast('Bienvenue '+user.prenom+' ! 🌴','success');
 }
 function doRegister() {
@@ -3657,6 +3660,39 @@ function sendPushNotif(title, body) {
   }
 }
 
+function attachClientNotifListener(user) {
+  if (!user || !user.id) return;
+  var isAdmin = user.role==='superadmin'||user.role==='admin'||user.role==='entreprise';
+  if (isAdmin) return;
+  console.log('[Notif] Attaching listener for user:', user.id);
+  var sessionStart = new Date().toISOString();
+  // Remove old listener first
+  db.ref('status_updates/'+user.id).off();
+  // Attach new listener
+  db.ref('status_updates/'+user.id).on('child_added', function(snap) {
+    var update = snap.val();
+    if (!update || !update.at) { snap.ref.remove(); return; }
+    console.log('[Notif] Received update:', update.status, update.title);
+    // Show all updates regardless of age when app is open
+    if (update.status === 'ready') {
+      showOrderReadyAlert({orderNumber: update.orderNumber, id: update.orderId});
+      sendPushNotif(update.title, update.body);
+    } else if (update.status === 'confirmed' || update.status === 'preparing') {
+      toast('📦 '+update.title+' — '+update.body, 'info', 7000);
+      sendPushNotif(update.title, update.body);
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    } else if (update.status === 'picked_up') {
+      toast('✅ '+update.body, 'success', 5000);
+    } else {
+      // Message / offre / relance
+      toast('📣 '+update.title+' : '+update.body, 'info', 8000);
+      sendPushNotif(update.title, update.body);
+      if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
+    }
+    snap.ref.remove();
+  });
+}
+
 function startCountdown() {
   setInterval(function(){
     var el = document.getElementById('countdown');
@@ -3710,6 +3746,11 @@ function startCountdown() {
         });
     }
     startFirebaseListeners();
+    // Attach notification listener if user already logged in
+    var _initUser = getCurrentUser();
+    if (_initUser && _initUser.role === 'client') {
+      attachClientNotifListener(_initUser);
+    }
     updateHeaderAuth();
     updateBadges();
     renderHome();
