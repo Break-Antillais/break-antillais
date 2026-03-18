@@ -503,20 +503,29 @@ function startFirebaseListeners() {
   db.ref('data/users').on('value', function(){ mergeUsers(); });
   db.ref('data/ba_users').on('value', function(){ mergeUsers(); });
 
-  // Listen for real-time notifications for current client
+  // Listen for real-time status updates
   if (user && !isAdmin) {
-    // Record session start time
-    var sessionStart = Date.now();
-    db.ref('notifs/'+user.id).orderByChild('at').on('child_added', function(snap) {
-      var notif = snap.val();
-      if (!notif) return;
-      // Only show notifications that arrived after this session started
-      var notifTime = new Date(notif.at).getTime();
-      if (notifTime > sessionStart - 5000) { // 5s buffer for timing
-        toast(notif.title+' : '+notif.body, 'info', 6000);
-        sendPushNotif(notif.title, notif.body);
-        if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
+    db.ref('status_updates/'+user.id).on('child_added', function(snap) {
+      var update = snap.val();
+      if (!update) return;
+      var age = (Date.now() - new Date(update.at).getTime()) / 1000;
+      if (age < 60) {
+        if (update.status === 'ready') {
+          var orders = getOrders();
+          var o = orders.find(function(x){ return x.id === update.orderId; });
+          if (o) showOrderReadyAlert(o);
+          else {
+            toast(update.title+' : '+update.body, 'success', 8000);
+            sendPushNotif(update.title, update.body);
+            if (navigator.vibrate) navigator.vibrate([500,100,500,100,500]);
+          }
+        } else {
+          toast(update.title+' : '+update.body, 'info', 6000);
+          sendPushNotif(update.title, update.body);
+          if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        }
       }
+      snap.ref.remove();
     });
   }
 }
