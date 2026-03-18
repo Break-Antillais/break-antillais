@@ -505,25 +505,27 @@ function startFirebaseListeners() {
 
   // Listen for real-time status updates
   if (user && !isAdmin) {
+    // Only show updates written after session started
+    var _sessionStart = new Date().toISOString();
     db.ref('status_updates/'+user.id).on('child_added', function(snap) {
       var update = snap.val();
-      if (!update) return;
-      var age = (Date.now() - new Date(update.at).getTime()) / 1000;
-      if (age < 60) {
-        if (update.status === 'ready') {
-          var orders = getOrders();
-          var o = orders.find(function(x){ return x.id === update.orderId; });
-          if (o) showOrderReadyAlert(o);
-          else {
-            toast(update.title+' : '+update.body, 'success', 8000);
-            sendPushNotif(update.title, update.body);
-            if (navigator.vibrate) navigator.vibrate([500,100,500,100,500]);
-          }
-        } else {
-          toast(update.title+' : '+update.body, 'info', 6000);
-          sendPushNotif(update.title, update.body);
-          if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-        }
+      if (!update || !update.at) { snap.ref.remove(); return; }
+      // Only process updates written after we connected
+      if (update.at < _sessionStart) { snap.ref.remove(); return; }
+      if (update.status === 'ready') {
+        showOrderReadyAlert({orderNumber: update.orderNumber, id: update.orderId});
+        sendPushNotif(update.title, update.body);
+      } else if (update.status === 'confirmed' || update.status === 'preparing') {
+        toast('📦 '+update.title+' — '+update.body, 'info', 7000);
+        sendPushNotif(update.title, update.body);
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+      } else if (update.status === 'picked_up') {
+        toast('✅ '+update.body, 'success', 5000);
+      } else {
+        // Message admin / offre / relance
+        toast('📣 '+update.title+' : '+update.body, 'info', 8000);
+        sendPushNotif(update.title, update.body);
+        if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
       }
       snap.ref.remove();
     });
@@ -732,20 +734,19 @@ function notify(userId, title, body) {
   u.notifs.unshift(notif);
   if (u.notifs.length > 50) u.notifs = u.notifs.slice(0,50);
   saveUser(u);
-  // Write to dedicated real-time notifs path in Firebase
-  db.ref('notifs/'+userId+'/'+notif.id).set(notif).catch(function(e){});
-  // Queue for FCM push (background notification)
-  db.ref('push_queue/'+notif.id).set({
-    userId: userId,
+  // Write to status_updates so client listener picks it up immediately
+  db.ref('status_updates/'+userId+'/'+notif.id).set({
+    orderId: '',
+    orderNumber: '',
+    status: 'message',
     title: title,
     body: body,
-    at: notif.at,
-    sent: false
-  }).catch(function(e){});
-  // If current user, show immediately
+    at: notif.at
+  }).catch(function(e){ console.warn('notify write error:', e); });
+  // If current user is viewing app right now, show immediately
   var cur = getCurrentUser();
   if (cur && cur.id === userId) {
-    toast(title + ': ' + body, 'info', 5000);
+    toast(title + ' : ' + body, 'info', 5000);
     sendPushNotif(title, body);
   }
 }
@@ -2275,6 +2276,15 @@ function advanceOrder(id){
     picked_up:'Commande n°'+o.orderNumber+' recuperee. Merci ! 🌴'
   };
   notify(o.userId, titles[nxt], bodies[nxt]);
+  // Write to status_updates for real-time client notification
+  db.ref('status_updates/'+o.userId+'/'+genId()).set({
+    orderId: o.id,
+    orderNumber: o.orderNumber,
+    status: nxt,
+    title: titles[nxt],
+    body: bodies[nxt],
+    at: new Date().toISOString()
+  });
   toast('Statut mis a jour','success');
   document.getElementById('admin-content').innerHTML=adminOrders();
 }
