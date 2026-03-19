@@ -653,7 +653,7 @@ var DEFAULT_CFG = {
 var cart = [];
 var currentScreen = 'home';
 var pendingProd = null;
-var pendingExtras = {meats:[], sauces:[], crudites:[]};
+var pendingExtras = {meats:[], sauces:[], crudites:[], supplements:[]};
 var _slot = null;
 var _payment = null;
 var _boxQtys = {};
@@ -3663,24 +3663,39 @@ function addRewardToCartByPalier(palierName) {
 }
 
 function confirmRewardChoice(productName, palierName) {
-  // Find the real product to check if it needs configuration
   var products = getProducts();
   var prod = products.find(function(p){ return p.name === productName; });
-  var needsConfig = prod && ['bokit','crepe_salee','agoulou'].indexOf(prod.cat) >= 0;
+  // Detect if config needed by category OR by name keywords
+  var cat = prod ? prod.cat : '';
+  var nameLow = productName.toLowerCase();
+  var needsConfig = ['bokit','crepe_salee','agoulou'].indexOf(cat) >= 0
+    || nameLow.indexOf('bokit') >= 0
+    || nameLow.indexOf('agoulou') >= 0
+    || nameLow.indexOf('crepe jambon') >= 0
+    || nameLow.indexOf('crepe complete') >= 0;
+
+  // Always use a fake prod object if not found
+  if (!prod) {
+    prod = {
+      id: 'reward-'+palierName,
+      name: productName,
+      cat: needsConfig ? 'bokit' : 'boisson',
+      price: 0,
+      ok: true
+    };
+  }
 
   if (needsConfig) {
-    // Show sauce/supplement configurator before adding to cart
     closeModal('m-product');
-    showRewardConfig(productName, palierName, prod);
+    setTimeout(function(){ showRewardConfig(productName, palierName, prod); }, 50);
   } else {
-    // No config needed (boisson, crepe sucree) - add directly
     closeModal('m-product');
     cart.push({
       id: genId(),
-      pid: prod ? prod.id : 'reward-'+palierName,
+      pid: prod.id,
       name: productName,
       price: 0,
-      cat: prod ? prod.cat : 'reward',
+      cat: prod.cat,
       details: 'Recompense palier '+palierName,
       qty: 1,
       isReward: true,
