@@ -912,26 +912,36 @@ function doRegister() {
   // Save signup points history
   var initHist = [{pts:signupPts, label:'Bonus inscription', at:new Date().toISOString()}];
   save('ba_pts_history_'+newUser.id, initHist);
-  // Process referral code
+  // Process referral code via Firebase
   var refCode = (document.getElementById('rg-ref')||{}).value||'';
   if (refCode.trim()) {
-    var refUser = getUsers().find(function(u){ return u.referralCode === refCode.trim().toUpperCase(); });
-    if (refUser && refUser.id !== newUser.id) {
+    var refCodeUpper = refCode.trim().toUpperCase();
+    // Search in Firebase directly to find parrain
+    db.ref('data/users').orderByChild('referralCode').equalTo(refCodeUpper).once('value').then(function(snap) {
+      var usersObj = snap.val();
+      if (!usersObj) return;
+      var refUser = Object.values(usersObj)[0];
+      if (!refUser || refUser.id === newUser.id) return;
       var cfg2 = getCfg();
       var refBonus = cfg2.referralPtsParrain || 100;
       var filleulBonus = cfg2.referralPtsFilleul || 50;
+      // Update parrain points
       refUser.points = (refUser.points||0) + refBonus;
+      db.ref('data/users/'+refUser.id+'/points').set(refUser.points);
       var refHist = load('ba_pts_history_'+refUser.id, []);
       refHist.unshift({pts:refBonus, label:'Parrainage de '+prenom, at:new Date().toISOString()});
       save('ba_pts_history_'+refUser.id, refHist);
       saveUser(refUser);
+      // Update filleul points
       newUser.points = (newUser.points||0) + filleulBonus;
-      saveUser(newUser);
+      db.ref('data/users/'+newUser.id+'/points').set(newUser.points);
       var newHist = load('ba_pts_history_'+newUser.id, []);
-      newHist.push({pts:filleulBonus, label:'Bonus parrainage', at:new Date().toISOString()});
+      newHist.unshift({pts:filleulBonus, label:'Bonus parrainage', at:new Date().toISOString()});
       save('ba_pts_history_'+newUser.id, newHist);
-      notify(refUser.id, '🎉 Parrainage validé !', prenom+' a utilisé votre code. +'+refBonus+' points offerts !');
-    }
+      saveUser(newUser);
+      notify(refUser.id, '🎉 Parrainage valide !', prenom+' a utilise votre code. +'+refBonus+' points offerts !');
+      toast('Code de parrainage valide ! +'+filleulBonus+' points bonus !', 'success', 5000);
+    }).catch(function(e){ console.warn('Referral error:', e); });
   }
   setCurrentUser(newUser);
   closeModal('m-auth');
@@ -2222,7 +2232,22 @@ function toggleAdminAlert(btn) {
 }
 
 function adminOrders(){
-  var orders=getOrders().slice().sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt);});
+  var orders=getOrders().slice().sort(function(a,b){
+    // Active orders: sort by pickup time ASC
+    var activeStatus = ['pending','confirmed','preparing','ready'];
+    var aActive = activeStatus.indexOf(a.status) >= 0;
+    var bActive = activeStatus.indexOf(b.status) >= 0;
+    if (aActive && !bActive) return -1;
+    if (!aActive && bActive) return 1;
+    if (aActive && bActive) {
+      // Sort by pickup date then time
+      var dateCompare = (a.pickupDate||'').localeCompare(b.pickupDate||'');
+      if (dateCompare !== 0) return dateCompare;
+      return (a.pickupTime||'').localeCompare(b.pickupTime||'');
+    }
+    // Done orders: most recent first
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
   if(!orders.length) return '<div class="empty-state"><div class="icon">📭</div><div class="title">Aucune commande</div></div>';
   var next={pending:'confirmed',confirmed:'preparing',preparing:'ready',ready:'picked_up'};
   var nextL={confirmed:'✅ Valider',preparing:'👨‍🍳 En prep.',ready:'🎉 Prete',picked_up:'✅ Recuperee'};
@@ -3587,7 +3612,10 @@ function getReferralSection(user) {
     +'<div class="text-sm text-muted mb-1">Votre code de parrainage</div>'
     +'<div style="font-family:var(--head);font-size:1.8rem;font-weight:800;color:var(--red);letter-spacing:.1em;margin:.4rem 0">'+user.referralCode+'</div>'
     +'<div class="text-sm text-muted mb-2">Partagez ce code — vous gagnez <strong style="color:var(--gold)">100 pts</strong> par ami parrainé, lui gagne <strong style="color:var(--gold)">50 pts</strong> bonus</div>'
-    +'<button class="btn btn-secondary btn-sm btn-full" data-code="'+user.referralCode+'" onclick="copyReferral(this.dataset.code)">📋 Copier le code</button>'
+    +'<div style="display:flex;gap:.5rem">'
+    +'<button class="btn btn-secondary btn-sm" style="flex:1" data-code="'+user.referralCode+'" onclick="copyReferral(this.dataset.code)">📋 Copier</button>'
+    +'<button class="btn btn-primary btn-sm" style="flex:1" data-code="'+user.referralCode+'" onclick="shareReferral(this.dataset.code)">📤 Partager</button>'
+    +'</div>'
     +'</div>';
 }
 
@@ -3602,6 +3630,30 @@ function copyReferral(code) {
     document.execCommand('copy');
     document.body.removeChild(el);
     toast('Code copie !','success');
+  }
+}
+
+function shareReferral(code) {
+  var cfg = getCfg();
+  var user = getCurrentUser();
+  var signupPts = cfg.signupPts || 50;
+  var filleulPts = cfg.referralPtsFilleul || 50;
+  var parrainPts = cfg.referralPtsParrain || 100;
+  var msg = '🌴 Commandez vos bokits et specialites antillaises sur Break Antillais !'
+    + '\n\nUtilisez mon code de parrainage : *' + code + '*'
+    + '\n\n✅ ' + signupPts + ' points offerts a l\'inscription'
+    + '\n🎁 +' + filleulPts + ' points bonus avec mon code'
+    + '\n\n👉 https://break-antillais.github.io/break-antillais';
+  if (navigator.share) {
+    navigator.share({
+      title: 'Break Antillais 🌴',
+      text: msg,
+      url: 'https://break-antillais.github.io/break-antillais'
+    }).catch(function(e){ copyReferral(code); });
+  } else {
+    // Fallback: WhatsApp link
+    var waUrl = 'https://wa.me/?text=' + encodeURIComponent(msg);
+    window.open(waUrl, '_blank');
   }
 }
 
