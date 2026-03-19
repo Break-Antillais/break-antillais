@@ -586,11 +586,12 @@ var STATUTS = {
   cancelled: {label:'Annulee',       icon:'❌', color:'#ef4444'}
 };
 var PALIERS = [
-  {name:'Bronze',  min:0,    max:499,   color:'#cd7f32', icon:'🥉', reward:'Accumulation de points', rewardShort:''},
-  {name:'Argent',  min:500,  max:999,   color:'#c0c0c0', icon:'🥈', reward:'1 boisson offerte', rewardShort:'🥤 Offerte'},
-  {name:'Or',      min:1000, max:2499,  color:'#D4AF37', icon:'🥇', reward:'1 crepe sucree offerte', rewardShort:'🍫 Offerte'},
-  {name:'Diamant', min:2500, max:4999,  color:'#b9f2ff', icon:'💎', reward:'1 bokit simple offert', rewardShort:'🫓 Offert'},
-  {name:'VIP',     min:5000, max:99999, color:'#ff6b6b', icon:'👑', reward:'1 menu complet offert (bokit + boisson)', rewardShort:'🎁 Menu Offert'}
+  {name:'Bronze',  min:0,    max:319,   color:'#cd7f32', icon:'🥉', reward:'', rewardShort:'', threshold:'0€'},
+  {name:'Argent',  min:320,  max:639,   color:'#c0c0c0', icon:'🥈', reward:'1 boisson offerte', rewardShort:'🥤 Offerte', threshold:'30€'},
+  {name:'Or',      min:640,  max:959,   color:'#D4AF37', icon:'🥇', reward:'1 crepe sucree offerte', rewardShort:'🍫 Offerte', threshold:'60€'},
+  {name:'Diamant', min:960,  max:1279,  color:'#b9f2ff', icon:'💎', reward:'1 bokit simple offert', rewardShort:'🫓 Offert', threshold:'90€'},
+  {name:'Platine', min:1280, max:1679,  color:'#e5e4e2', icon:'💠', reward:'Menu complet offert', rewardShort:'🎁 Menu', threshold:'120€'},
+  {name:'VIP',     min:1680, max:99999, color:'#ff6b6b', icon:'👑', reward:'1 menu complet offert (bokit + boisson)', rewardShort:'🎁 Menu Offert', threshold:'160€'}
 ];
 
 var DEFAULT_PRODUCTS = [
@@ -631,8 +632,9 @@ var DEFAULT_PRODUCTS = [
 var DEFAULT_CFG = {
   cutoff:'17:00', start:'19:00', end:'22:00',
   address:'37 avenue Lenine, 37700 St-Pierre-des-Corps',
-  maxSlot:8, ptsPerEuro:10, signupPts:50,
-  referralPtsParrain:100, referralPtsFilleul:50, birthdayPts:50,
+  maxSlot:8, ptsPerEuro:10, signupPts:20,
+  referralPtsParrain:20, referralPtsFilleul:10, birthdayPts:50,
+  bonusOrderThreshold:20, bonusOrderPts:5,
   openDays:[2,3,4,5,6], // 0=dim, 1=lun, 2=mar, 3=mer, 4=jeu, 5=ven, 6=sam
   maintenance:false, maintenanceMsg:'Nous revenons bientot !',
   closedDates:[], // [{date:'2025-12-25', msg:'Ferme pour Noel'}]
@@ -1487,7 +1489,8 @@ function renderCart() {
   }
   var cfg=getCfg();
   var total=cart.reduce(function(s,i){return s+i.price*i.qty;},0);
-  var pts=Math.floor(total)*(cfg.ptsPerEuro||10);
+  var ptsPerEuro = cfg.ptsPerEuro||10;
+  var pts=Math.floor(total)*ptsPerEuro + (total>=(cfg.bonusOrderThreshold||20)?(cfg.bonusOrderPts||5):0);
   var html=header('Panier')+'<div style="padding:1rem 1rem 5rem">';
   html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">'
     +'<span class="font-head fw-800" style="font-size:1.2rem">Mon panier</span>'
@@ -2045,7 +2048,7 @@ function renderProfile(){
     +'<div><div class="fw-700" style="color:#fff">'+orders.length+'</div><div style="font-size:.7rem;opacity:.55">commandes</div></div>'
     +'<div><div class="fw-700" style="color:#fff">'+fmt(spent)+'</div><div style="font-size:.7rem;opacity:.55">depense</div></div></div>'
     +(nextP?'<div style="margin-top:.85rem;position:relative">'
-      +'<div style="display:flex;justify-content:space-between;font-size:.72rem;margin-bottom:.3rem;opacity:.7"><span>Vers '+nextP.icon+' '+nextP.name+'</span><span>'+pts+'/'+nextP.min+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;font-size:.72rem;margin-bottom:.3rem;opacity:.7"><span>Vers '+nextP.icon+' '+nextP.name+'</span><span>'+(nextP.threshold?nextP.threshold+' depenses':nextP.min+' pts requis')+'</span></div>'
       +'<div style="background:rgba(255,255,255,.1);border-radius:100px;height:5px">'
       +'<div style="background:'+nextP.color+';width:'+progress+'%;height:100%;border-radius:100px"></div></div></div>':'')
     +'</div>';
@@ -2077,7 +2080,7 @@ function renderProfile(){
       +'<span style="font-size:1.5rem">'+p.icon+'</span>'
       +'<div style="flex:1"><div class="fw-700" style="color:'+p.color+'">'+p.name+'</div>'
       +(p.reward?'<div class="text-sm" style="color:#2d9e5f">🎁 '+p.reward+'</div>':'')
-      +'<div class="text-sm text-muted">'+p.min+(p.max<99999?' - '+p.max:'+')+'  pts</div></div>'
+      +'<div class="text-sm text-muted">'+(p.threshold?'Debloque a '+p.threshold+' depenses':p.min+' pts')+'</div></div>'
       +(done?'<span style="color:#2d9e5f;font-weight:700;font-size:.82rem">✓ Atteint</span>'
              :'<span class="text-muted text-sm">'+Math.max(0,p.min-pts)+' pts</span>')
       +'</div>';
@@ -2284,15 +2287,24 @@ function advanceOrder(id){
     if(u){
       var cfg=getCfg();
       var pts=Math.floor(o.total)*(cfg.ptsPerEuro||10);
-      u.points=(u.points||0)+pts;
+      // Bonus 5pts for orders over 20€
+      var cfg3 = getCfg();
+      var bonusThreshold = cfg3.bonusOrderThreshold || 20;
+      var bonusPts = cfg3.bonusOrderPts || 5;
+      var bonus = o.total >= bonusThreshold ? bonusPts : 0;
+      var totalPts = pts + bonus;
+      u.points=(u.points||0)+totalPts;
+      db.ref('data/users/'+u.id+'/points').set(u.points);
       // Save points history
       var hist = load('ba_pts_history_'+u.id, []);
-      hist.unshift({pts:pts, label:'Commande n°'+o.orderNumber, at:new Date().toISOString()});
+      var histLabel = 'Commande n°'+o.orderNumber+(bonus>0?' (+'+bonus+' pts bonus >'+bonusThreshold+'€)':'');
+      hist.unshift({pts:totalPts, label:histLabel, at:new Date().toISOString()});
       if(hist.length>50) hist=hist.slice(0,50);
       save('ba_pts_history_'+u.id, hist);
       saveUser(u);
       o.pointsAwarded=true;
-      notify(o.userId,'🎁 Points ajoutes !','+'+pts+' points pour votre commande n°'+o.orderNumber);
+      var notifMsg = '+'+pts+' points'+(bonus>0?' + '+bonus+' pts bonus':'')+' pour votre commande n°'+o.orderNumber;
+      notify(o.userId,'🎁 Points ajoutes !', notifMsg);
     }
   }
   saveOrder(o);
