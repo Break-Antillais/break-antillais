@@ -2596,7 +2596,8 @@ function adminLoyalty(){
       +'<input class="form-input" id="pal-min-'+i+'" type="number" value="'+p.min+'" placeholder="Min pts" style="flex:1"/>'
       +'<input class="form-input" id="pal-max-'+i+'" type="number" value="'+p.max+'" placeholder="Max pts" style="flex:1"/>'
       +'</div>'
-      +'<input class="form-input" id="pal-reward-'+i+'" value="'+(p.reward||'')+'" placeholder="Description (ex: 1 produit offert au choix)" style="margin-top:.35rem"/>'      +'<input class="form-input" id="pal-choices-'+i+'" value="'+(p.choices||[]).join(', ')+'" placeholder="Produits au choix separes par virgule" style="margin-top:.35rem;font-size:.8rem"/>'
+      +'<input class="form-input" id="pal-reward-'+i+'" value="'+(p.reward||'')+'" placeholder="Description (ex: 1 produit offert au choix)" style="margin-top:.35rem"/>'      +'<div style="margin-top:.5rem"><label class="form-label" style="font-size:.68rem">Produits proposés (cochés = disponibles)</label>'
+      +'<div id="pal-choices-wrap-'+i+'" style="display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.3rem">'+buildChoicesCheckboxes(i, p.choices||[])+'</div></div>'
       +'<div style="display:flex;gap:.5rem;margin-top:.35rem">'
       +'<input class="form-input" id="pal-icon-'+i+'" value="'+p.icon+'" placeholder="Emoji" style="flex:1;max-width:80px"/>'
       +'<input class="form-input" id="pal-color-'+i+'" type="color" value="'+p.color+'" style="flex:1;max-width:60px;padding:.3rem;height:38px;cursor:pointer"/>'
@@ -2642,8 +2643,11 @@ function savePaliers(){
     var color=document.getElementById('pal-color-'+i);
     if(!name) continue;
     var reward=document.getElementById('pal-reward-'+i);
-    var choicesEl=document.getElementById('pal-choices-'+i);
-    var choicesArr = choicesEl ? choicesEl.value.split(',').map(function(s){return s.trim();}).filter(Boolean) : (paliers[i].choices||[]);
+    var choicesArr = [];
+    document.querySelectorAll('[data-palier="'+i+'"][data-prod]').forEach(function(cb){
+      if(cb.checked) choicesArr.push(cb.dataset.prod);
+    });
+    if (!choicesArr.length) choicesArr = paliers[i].choices||[];
     updated.push({
       name:name.value.trim()||paliers[i].name,
       min:parseInt(min.value)||paliers[i].min,
@@ -2933,6 +2937,19 @@ function deleteSupp(i) {
   var sl = document.getElementById('supps-list');
   if(sl) sl.innerHTML = buildSuppsList();
 }
+function buildChoicesCheckboxes(palierIdx, selected) {
+  var products = getProducts().filter(function(p){ return p.ok && !p.soon; });
+  products.sort(function(a,b){ return a.name.localeCompare(b.name,'fr'); });
+  var html = '';
+  products.forEach(function(p){
+    var checked = selected.indexOf(p.name) >= 0;
+    html += '<label style="display:flex;align-items:center;gap:.3rem;padding:.25rem .5rem;background:var(--dark4);border-radius:6px;cursor:pointer;font-size:.75rem">'
+      +'<input type="checkbox" data-palier="'+palierIdx+'" data-prod="'+p.name+'" '+(checked?'checked':'')+' style="accent-color:var(--red)"/>'
+      +p.name+'</label>';
+  });
+  return html;
+}
+
 function buildMeatsList() {
   var meats = getMeats();
   var html = '';
@@ -3646,20 +3663,135 @@ function addRewardToCartByPalier(palierName) {
 }
 
 function confirmRewardChoice(productName, palierName) {
+  // Find the real product to check if it needs configuration
+  var products = getProducts();
+  var prod = products.find(function(p){ return p.name === productName; });
+  var needsConfig = prod && ['bokit','crepe_salee','agoulou'].indexOf(prod.cat) >= 0;
+
+  if (needsConfig) {
+    // Show sauce/supplement configurator before adding to cart
+    closeModal('m-product');
+    showRewardConfig(productName, palierName, prod);
+  } else {
+    // No config needed (boisson, crepe sucree) - add directly
+    closeModal('m-product');
+    cart.push({
+      id: genId(),
+      pid: prod ? prod.id : 'reward-'+palierName,
+      name: productName,
+      price: 0,
+      cat: prod ? prod.cat : 'reward',
+      details: 'Recompense palier '+palierName,
+      qty: 1,
+      isReward: true,
+      rewardPalier: palierName
+    });
+    updateBadges();
+    toast('🎁 '+productName+' ajoute au panier !','success', 4000);
+    go('cart');
+  }
+}
+
+function showRewardConfig(productName, palierName, prod) {
+  // Reset extras
+  pendingExtras = {meats:[], sauces:[], crudites:[], supplements:[]};
+  var mc = getMeatCount(prod||{name:productName});
+  var m = document.getElementById('m-product');
+  var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
+    +'<div class="modal" style="max-height:92vh;position:relative"><div class="modal-handle"></div>'
+    +'<button onclick="closeModal(&apos;m-product&apos;)" style="position:absolute;top:.75rem;left:1rem;background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .7rem;border-radius:100px;font-weight:600;z-index:10">← Retour</button>'
+    +'<div style="height:2rem"></div>'
+    +'<div style="text-align:center;font-size:2.5rem;margin-bottom:.4rem">'+(EMOJI[prod?prod.cat:'bokit']||'🍽')+'</div>'
+    +'<h2 class="modal-title text-center">'+productName+'</h2>'
+    +'<div style="text-align:center;background:rgba(45,158,95,.1);border:1px solid rgba(45,158,95,.3);border-radius:8px;padding:.4rem .8rem;display:inline-block;margin:0 auto .75rem;font-size:.85rem;color:#2d9e5f;font-weight:700">🎁 Offert — Palier '+palierName+'</div>';
+
+  if (mc > 0) {
+    html += '<div class="form-group"><label class="form-label">🥩 '+(mc>1?mc+' viandes':'Viande')+' au choix</label><div class="chips" id="meat-chips">';
+    getMeats().forEach(function(mt){
+      var unavail = !mt.ok;
+      html += '<button class="chip" data-v="'+mt.name+'"'
+        +(unavail?' disabled style="opacity:.4;cursor:not-allowed"':' onclick="toggleMeat(this,'+mc+')"')+'>'
+        +mt.name+(unavail?' <span style="color:#ef4444;font-size:.65rem">(indispo)</span>':'')+'</button>';
+    });
+    html += '</div></div>';
+  }
+
+  html += '<div class="form-group"><label class="form-label">🥫 Sauce (max 3)</label><div class="chips" id="sauce-chips">';
+  getSauces().forEach(function(s){ html += '<button class="chip" data-v="'+s+'" onclick="toggleSauce(this)">'+s+'</button>'; });
+  html += '</div></div>';
+
+  html += '<div class="form-group"><label class="form-label">🥗 Crudites</label><div class="chips" id="crud-chips">';
+  CRUDITES.forEach(function(c){ html += '<button class="chip" data-v="'+c+'" onclick="toggleCrudite(this)">'+c+'</button>'; });
+  html += '</div></div>';
+
+  // Supplements - payants même pour récompense
+  html += '<div class="form-group"><label class="form-label">➕ Supplement viande <span style="color:var(--gold)">+'+fmt(SUPPLEMENT_PRICE)+'/piece</span></label>'
+    +'<div class="chips" id="supp-chips">';
+  var allMeatsMap2 = {};
+  getMeats().forEach(function(mt){ allMeatsMap2[mt.name]=mt.ok; });
+  getSupplements().forEach(function(s){
+    var unavail = allMeatsMap2[s]===false;
+    html += '<button class="chip" data-v="'+s+'"'
+      +(unavail?' disabled style="opacity:.4"':' onclick="toggleSupp(this)"')+'>'
+      +s+(unavail?' <span style="color:#ef4444;font-size:.65rem">(indispo)</span>':'')+'</button>';
+  });
+  html += '</div>'
+    +'<div id="supp-total" style="font-size:.82rem;color:var(--gold);font-weight:700;margin-top:.35rem;display:none"></div>'
+    +'</div>';
+
+  html += '<div class="form-group mt-1"><label class="form-label">📝 Note cuisine (optionnel)</label>'
+    +'<input class="form-input" id="prod-note" placeholder="Ex: sans oignon, extra sauce..."/></div>';
+
+  // Bottom bar
+  var suppCost = 0;
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;background:var(--dark3);border:1.5px solid rgba(45,158,95,.3);border-radius:var(--radius-sm);padding:.65rem 1rem;margin-top:.75rem">'
+    +'<div><div style="font-family:var(--head);font-weight:800;font-size:1.1rem;color:#2d9e5f" id="reward-price-display">Offert 🎁</div>'
+    +'<div style="font-size:.72rem;color:var(--muted)">Supplements en sus</div></div>'
+    +'<button class="btn btn-primary" data-pname="'+productName+'" data-palier="'+palierName+'" data-pcat="'+(prod?prod.cat:'bokit')+'" data-pid="'+(prod?prod.id:'reward-'+palierName)+'" onclick="addRewardConfigToCart(this)" style="padding:.7rem 1.25rem">🛒 Ajouter</button>'
+    +'</div></div></div>';
+
+  m.innerHTML = html;
+  m.style.display = 'block';
+}
+
+function addRewardConfigToCart(btn) {
+  var productName = btn.dataset.pname;
+  var palierName = btn.dataset.palier;
+  var cat = btn.dataset.pcat;
+  var pid = btn.dataset.pid;
+  var mc = getMeatCount({name:productName});
+
+  if (mc > 0 && pendingExtras.meats.length < mc) {
+    toast('Choisissez '+mc+' viande(s)','warning'); return;
+  }
+
+  var details = [];
+  if (pendingExtras.meats.length) details.push('Viandes: '+pendingExtras.meats.join(', '));
+  if (pendingExtras.sauces.length) details.push('Sauce: '+pendingExtras.sauces.join(', '));
+  if (pendingExtras.crudites.length) details.push('Crudites: '+pendingExtras.crudites.join(', '));
+  if (pendingExtras.supplements && pendingExtras.supplements.length) {
+    details.push('Suppl: '+pendingExtras.supplements.join(', ')+' (+'+fmt(pendingExtras.supplements.length*SUPPLEMENT_PRICE)+')');
+  }
+  var noteEl = document.getElementById('prod-note');
+  if (noteEl && noteEl.value.trim()) details.push('Note: '+noteEl.value.trim());
+
+  var suppCost = (pendingExtras.supplements||[]).length * SUPPLEMENT_PRICE;
+
   closeModal('m-product');
   cart.push({
     id: genId(),
-    pid: 'reward-'+palierName,
+    pid: pid,
     name: productName,
-    price: 0,
-    cat: 'reward',
-    details: 'Recompense palier '+palierName,
+    price: suppCost, // Only supplements are paid
+    cat: cat,
+    details: details.join(' | '),
     qty: 1,
     isReward: true,
     rewardPalier: palierName
   });
+  pendingExtras = {meats:[], sauces:[], crudites:[], supplements:[]};
   updateBadges();
-  toast('🎁 '+productName+' ajoute au panier !','success', 4000);
+  toast('🎁 '+productName+' ajoute au panier !'+(suppCost>0?' (+'+fmt(suppCost)+' supplements)':''),'success', 4000);
   go('cart');
 }
 
