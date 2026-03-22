@@ -1055,29 +1055,15 @@ function renderHome() {
   }
 
   // Tabs + grid
-  // Coups de coeur - featured products
+  // Build featured list for "incontournables" tab
   var orders = getOrders().filter(function(o){ return o.status==='picked_up'; });
   var freq = {};
   orders.forEach(function(o){ o.items.forEach(function(i){ if(i.cat!=='boisson'&&i.cat!=='reward') freq[i.name]=(freq[i.name]||0)+1; }); });
-  var featured = prods.filter(function(p){ return p.featured || (freq[p.name]&&freq[p.name]>=2); })
-    .sort(function(a,b){ return (freq[b.name]||0)-(freq[a.name]||0); }).slice(0,4);
-  if(featured.length>0){
-    html += '<div style="padding:0 .9rem .25rem"><div class="sec-title">⭐ Nos incontournables</div><div class="pgrid" style="margin-bottom:.5rem">';
-    featured.forEach(function(p){
-      var favs=user?load('ba_favs_'+user.id,[]):[];
-      html+='<div class="product-card" data-pid="'+p.id+'" onclick="openProduct(&quot;'+p.id+'&quot;)">'+
-        (p.image?'<img src="'+p.image+'" class="product-img">':'<div class="product-img" style="display:flex;align-items:center;justify-content:center;font-size:2.5rem">'+(EMOJI[p.cat]||'🍽')+'</div>')+
-        '<div class="product-info">'+
-        '<div class="product-name">'+p.name+'</div>'+
-        (p.desc?'<div class="product-desc">'+p.desc+'</div>':'')+
-        '<div class="product-footer"><span class="product-price">'+fmt(p.price)+'</span>'+
-        '<button class="fav-btn" data-pid="'+p.id+'" onclick="event.stopPropagation();toggleFav(&quot;'+p.id+'&quot;,this)">'+(favs.indexOf(p.id)>=0?'❤️':'🤍')+'</button></div>'+
-        '</div></div>';
-    });
-    html += '</div></div>';
-  }
+  var hasFeatured = prods.some(function(p){ return p.featured || (freq[p.name]&&freq[p.name]>=2); });
 
-  var cats = [{k:'bokit',l:'🫓 Bokits'},{k:'agoulou',l:'🌯 Agoulou'},{k:'crepe_salee',l:'🥞 Crepes Salee'},{k:'crepe_sucree',l:'🍫 Crepes Sucree'},{k:'mini_bokit',l:'📦 Box Mini'},{k:'enfant',l:'🧒 Enfants'},{k:'boisson',l:'🥤 Boissons'}];
+  var cats = [];
+  if(hasFeatured) cats.push({k:'featured',l:'⭐ Top'});
+  cats = cats.concat([{k:'bokit',l:'🫓 Bokits'},{k:'agoulou',l:'🌯 Agoulou'},{k:'crepe_salee',l:'🥞 Crepes Salee'},{k:'crepe_sucree',l:'🍫 Crepes Sucree'},{k:'mini_bokit',l:'📦 Box Mini'},{k:'enfant',l:'🧒 Enfants'},{k:'boisson',l:'🥤 Boissons'}]);
   html += '<div class="tabs">';
   cats.forEach(function(c,i){ html += '<button class="tab-btn'+(i===0?' active':'')+'" data-cat="'+c.k+'" onclick="filterCat(this.dataset.cat,this)">'+c.l+'</button>'; });
   html += '</div>';
