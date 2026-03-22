@@ -377,7 +377,7 @@ OneSignalDeferred.push(function(OneSignal) {
     appId: ONESIGNAL_APP_ID,
     allowLocalhostAsSecureOrigin: true,
     serviceWorkerPath: 'OneSignalSDK.sw.js',
-    serviceWorkerParam: { scope: '/' },
+    serviceWorkerParam: { scope: '/break-antillais/' },
     notifyButton: { enable: false }
   });
 });
@@ -4464,9 +4464,9 @@ function startCountdown() {
         .then(function(reg) { console.log('FCM SW registered:', reg.scope); })
         .catch(function(e) { console.log('FCM SW failed:', e); });
       // OneSignal SW (obligatoire pour notifs app fermée)
-      navigator.serviceWorker.register('./OneSignalSDK.sw.js', { scope: '/' })
-        .then(function(reg) { console.log('OneSignal SW registered:', reg.scope); })
-        .catch(function(e) { console.log('OneSignal SW failed:', e); });
+      navigator.serviceWorker.register('./OneSignalSDK.sw.js', { scope: '/break-antillais/' })
+        .then(function(reg) { console.log('✅ OneSignal SW registered, scope:', reg.scope); })
+        .catch(function(e) { console.error('❌ OneSignal SW failed:', e); });
     }
     startFirebaseListeners();
     // Attach notification listener if user already logged in
