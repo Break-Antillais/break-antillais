@@ -629,6 +629,7 @@ var DEFAULT_PRODUCTS = [
   {id:'mb1',cat:'mini_bokit',name:'Box 10 Mini Bokit',price:17.00,desc:'Max 2 saveurs differentes - 5 mini bokit par saveur',ok:true,boxType:'box10',maxSaveurs:2,qty:10},
   {id:'mb2',cat:'mini_bokit',name:'Box 20 Mini Bokit',price:32.00,desc:'Max 5 saveurs differentes - repartition libre',ok:true,boxType:'box20',maxSaveurs:5,qty:20},
   {id:'mb3',cat:'mini_bokit',name:'Box 30 Mini Bokit',price:45.00,desc:'Max 5 saveurs differentes - repartition libre',ok:true,boxType:'box30',maxSaveurs:5,qty:30},
+  {id:'mb4',cat:'mini_bokit',name:'Box 40+ Mini Bokit',price:0,desc:'Commande speciale — contactez-nous directement',ok:true,boxType:'box40',maxSaveurs:5,qty:40,contactOnly:true},
   {id:'e1',cat:'enfant',name:'Menu Enfant Bokit',price:5.00,desc:'1 mini bokit + 1 boisson',ok:true},
   {id:'e2',cat:'enfant',name:'Menu Enfant Crepe',price:4.50,desc:'1 crepe sucree + 1 boisson',ok:true},
   {id:'e3',cat:'enfant',name:'Menu Enfant Complet',price:6.50,desc:'1 mini bokit + 1 crepe sucree + 1 boisson',ok:true}
@@ -1202,6 +1203,16 @@ function openProduct(id) {
   var cfg = getCfg();
   var now = new Date(); var cp=cfg.cutoff.split(':');
   var cutoff=new Date(); cutoff.setHours(+cp[0],+cp[1],0,0);
+  var p = getProducts().find(function(x){ return x.id===id; });
+  if (!p) return;
+
+  // Box 30+ contact modal
+  continueOpenProduct(id);
+}
+
+function continueOpenProduct(id) {
+  var user = getCurrentUser();
+  var cfg = getCfg();
   var p = getProducts().find(function(x){ return x.id===id; });
   if (!p) return;
   pendingProd = p;
