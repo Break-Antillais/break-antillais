@@ -100,7 +100,8 @@ body > *:not(#loading):not(#app-bg) { position:relative; z-index:1; }
 .nav {
   position: fixed; bottom: 0; left: 0; right: 0;
   background: var(--dark2); border-top: 1px solid var(--border);
-  display: flex; z-index: 200; padding-bottom: env(safe-area-inset-bottom);
+  display: flex; z-index: 9999; padding-bottom: env(safe-area-inset-bottom);
+  transform: translateZ(0); -webkit-transform: translateZ(0);
 }
 .nav-btn {
   flex: 1; display: flex; flex-direction: column; align-items: center;
@@ -4052,14 +4053,72 @@ function buildChoicesCheckboxes(palierIdx, selected) {
 }
 
 function addCustomChoiceToPalier(palierIdx) {
-  var name = prompt("Nom du produit a ajouter :");
-  if (!name || !name.trim()) return;
+  // Construire la liste de tous les produits de l'app
+  var allProds = getProducts().filter(function(p){ return p.name; });
+  allProds.sort(function(a,b){ return a.name.localeCompare(b.name,'fr'); });
+  // Récupérer les produits déjà cochés dans ce palier pour éviter doublons
   var wrap = document.getElementById("pal-choices-wrap-"+palierIdx);
-  if (!wrap) return;
+  var already = [];
+  if(wrap){ wrap.querySelectorAll('input[type=checkbox]').forEach(function(inp){ already.push(inp.dataset.prod); }); }
+  // Produits pas encore présents
+  var toShow = allProds.filter(function(p){ return already.indexOf(p.name)<0; });
+
+  // Créer la modale de sélection
+  var existing = document.getElementById('modal-add-choice');
+  if(existing) existing.remove();
+
+  var m = document.createElement('div');
+  m.id = 'modal-add-choice';
+  m.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.75);display:flex;align-items:flex-end;justify-content:center';
+  
+  var cats = {};
+  toShow.forEach(function(p){
+    var cat = p.cat || 'autre';
+    if(!cats[cat]) cats[cat] = [];
+    cats[cat].push(p);
+  });
+  
+  var catLabels = {bokit:'🫓 Bokits', agoulou:'🌯 Agoulou', crepe_salee:'🥞 Crêpes salées', crepe_sucree:'🍫 Crêpes sucrées', mini_bokit:'📦 Box Mini', enfant:'🧒 Enfants', boisson:'🥤 Boissons'};
+  
+  var inner = '<div style="background:var(--dark2);border-radius:16px 16px 0 0;width:100%;max-width:520px;max-height:75vh;overflow-y:auto;padding:1.25rem">';
+  inner += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">';
+  inner += '<div style="font-weight:800;font-size:1.05rem">Ajouter un produit au palier</div>';
+    inner += '<button onclick="closeAddChoiceModal()" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer">×</button></div>';
+  
+  if(!toShow.length){
+    inner += '<p style="color:var(--muted);font-size:.85rem;text-align:center;padding:1rem 0">Tous les produits sont déjà ajoutés</p>';
+  } else {
+    Object.keys(cats).forEach(function(cat){
+      inner += '<div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:.75rem 0 .35rem">'+(catLabels[cat]||cat)+'</div>';
+      inner += '<div style="display:flex;flex-direction:column;gap:.3rem">';
+      cats[cat].forEach(function(p){
+        inner += '<button data-prodname="'+p.name.replace(/"/g,"&quot;")+'" data-pi="'+palierIdx+'" onclick="confirmAddChoiceToPalier(this)" style="background:var(--dark3);border:1px solid var(--border);border-radius:8px;padding:.55rem .85rem;text-align:left;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.5rem">'+p.name+(p.price?'<span style=\"color:var(--muted);font-size:.75rem;margin-left:auto\">'+p.price+'€</span>':'')+'</button>';
+      });
+      inner += '</div>';
+    });
+  }
+  inner += '</div>';
+  m.innerHTML = inner;
+  m.addEventListener('click', function(e){ if(e.target===m) m.remove(); });
+  document.body.appendChild(m);
+}
+
+function closeAddChoiceModal() {
+  var m = document.getElementById('modal-add-choice');
+  if(m) m.remove();
+}
+function confirmAddChoiceToPalier(btn) {
+  var name = btn.dataset.prodname;
+  var palierIdx = btn.dataset.pi;
+  var wrap = document.getElementById("pal-choices-wrap-"+palierIdx);
+  if (!wrap || !name) return;
   var lbl = document.createElement('label');
   lbl.style.cssText = 'display:flex;align-items:center;gap:.3rem;padding:.25rem .5rem;background:var(--dark4);border-radius:6px;cursor:pointer;font-size:.75rem';
-  lbl.innerHTML = '<input type="checkbox" data-palier="'+palierIdx+'" data-prod="'+name.trim()+'" checked style="accent-color:var(--red)"/>'+name.trim();
+  lbl.innerHTML = '<input type="checkbox" data-palier="'+palierIdx+'" data-prod="'+name+'" checked style="accent-color:var(--red)"/>'+name;
   wrap.insertBefore(lbl, wrap.lastElementChild);
+  var m = document.getElementById('modal-add-choice');
+  if(m) m.remove();
+  toast('Produit ajouté', 'success');
 }
 function buildMeatsList() {
   var meats = getMeats();
