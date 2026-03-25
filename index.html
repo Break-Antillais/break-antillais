@@ -823,12 +823,59 @@ function saveOrder(order) {
   save('ba_last_save', new Date().toISOString());
 }
 function saveProduct(p) {
-  // Get raw saved products (not merged with defaults to avoid overwrite)
+  // Si l'image est en base64 (> 500 chars), la stocker séparément dans Firebase
+  // pour ne pas saturer localStorage
+  var pToSave = Object.assign({}, p);
+  if (p.image && p.image.length > 500 && p.image.indexOf('data:') === 0) {
+    // Stocker l'image dans Firebase séparément
+    db.ref('data/product_images/' + p.id).set(p.image)
+      .catch(function(e){ console.warn('Image save error:', e); });
+    // Dans le produit, garder juste une référence
+    pToSave.image = '__firebase__' + p.id;
+    pToSave._imageRef = p.id;
+  }
   var saved = load('ba_products', null);
   if (!saved) saved = DEFAULT_PRODUCTS.slice();
-  var idx = saved.findIndex(function(x){ return x.id === p.id; });
-  if (idx >= 0) saved[idx] = p; else saved.push(p);
+  var idx = saved.findIndex(function(x){ return x.id === pToSave.id; });
+  if (idx >= 0) saved[idx] = pToSave; else saved.push(pToSave);
   save('ba_products', saved);
+}
+
+
+// Charger et injecter les images produits stockées dans Firebase
+function loadProductImages() {
+  var prods = getProducts();
+  prods.forEach(function(p) {
+    if (p.image && p.image.indexOf('__firebase__') === 0) {
+      var refId = p._imageRef || p.id;
+      db.ref('data/product_images/' + refId).once('value').then(function(snap){
+        var imgData = snap.val();
+        if (!imgData) return;
+        // Mettre à jour le produit en mémoire
+        p.image = imgData;
+        // Mettre à jour l'affichage si la carte est visible
+        var wrap = document.getElementById('pwrap-'+p.id);
+        if (wrap) {
+          wrap.outerHTML = '<div class="pcard-img"><img src="'+imgData+'" id="pimg-'+p.id+'" alt="'+p.name+'" style="cursor:zoom-in" onclick="showPhotoFullscreen(this.src,\''+p.name.replace(/\'/g,'')+'\')" /></div>';
+        }
+        var imgEl = document.getElementById('pimg-'+p.id);
+        if (imgEl) imgEl.src = imgData;
+      }).catch(function(){});
+    }
+  });
+}
+
+// Charger l'image réelle d'un produit depuis Firebase si nécessaire
+function getProductImage(p, callback) {
+  if (!p.image) { callback(null); return; }
+  if (p.image.indexOf('__firebase__') === 0) {
+    var refId = p._imageRef || p.id;
+    db.ref('data/product_images/' + refId).once('value').then(function(snap){
+      callback(snap.val() || null);
+    }).catch(function(){ callback(null); });
+  } else {
+    callback(p.image);
+  }
 }
 function deleteProduct(id) {
   // Track deleted IDs so merge doesn't bring them back
@@ -1223,6 +1270,8 @@ function renderHome() {
   bokits.forEach(function(p){ html += pcardHTML(p); });
   html += '</div></div>';
   sc.innerHTML = html;
+  // Charger les images produits depuis Firebase si nécessaire
+  setTimeout(loadProductImages, 300);
 }
 function filterCat(cat, btn) {
   document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
@@ -1242,15 +1291,20 @@ function filterCat(cat, btn) {
     prods.sort(function(a,b){ return a.name.localeCompare(b.name,'fr'); });
   }
   g.innerHTML = prods.length ? prods.map(pcardHTML).join('') : '<div class="empty-state" style="padding:2rem 0"><div class="icon">📭</div><p class="text-sm">Aucun produit dans cette categorie</p></div>';
+  setTimeout(loadProductImages, 200);
 }
 function pcardHTML(p) {
   var clickable = p.ok && !p.soon;
   var div = document.createElement('div');
   div.className = 'pcard' + (clickable?'':' unavail');
   if (clickable) { div.dataset.pid = p.id; div.setAttribute('onclick','openProduct(this.dataset.pid)'); }
-  var imgHtml = p.image
-    ? '<div class="pcard-img"><img src="'+p.image+'" alt="'+p.name+'" onclick="showPhotoFullscreen(this.src,\'' + p.name.replace(/\'/g, '') + '\')" style="cursor:zoom-in"/></div>'
-    : '<div class="pcard-img">'+(EMOJI[p.cat]||'\u{1F37D}')+'</div>';
+  var _imgSrc = p.image && p.image.indexOf('__firebase__') === 0 ? null : p.image;
+  var _imgId = 'pimg-' + p.id;
+  var imgHtml = _imgSrc
+    ? '<div class="pcard-img"><img src="'+_imgSrc+'" id="'+_imgId+'" alt="'+p.name+'" onclick="showPhotoFullscreen(this.src,\'' + p.name.replace(/\'/g, '') + '\')" style="cursor:zoom-in"/></div>'
+    : (p.image && p.image.indexOf('__firebase__') === 0)
+      ? '<div class="pcard-img" id="pwrap-'+p.id+'"><div style="width:100%;height:100%;background:var(--dark4);display:flex;align-items:center;justify-content:center;font-size:1.5rem">'+(EMOJI[p.cat]||'🍽')+'</div></div>'
+      : '<div class="pcard-img">'+(EMOJI[p.cat]||'\u{1F37D}')+'</div>';
   var allergenBadge = (p.allergens && p.allergens.length) ? '<div style="font-size:.7rem;color:#f59e0b;margin-top:.2rem">⚠ '+p.allergens.join(', ')+'</div>' : '';
   var user = getCurrentUser();
   var favs = user ? load('ba_favs_'+user.id, []) : [];
@@ -2960,10 +3014,6 @@ function prodForm(p){
 }
 function previewImg(input){
   var f=input.files[0]; if(!f) return;
-  // Trouver le bouton Enregistrer/Ajouter
-  var btn = document.querySelector('#m-product .btn-primary')
-         || document.querySelector('button[onclick*="saveNewProd"]')
-         || document.querySelector('button[onclick*="saveEditProd"]');
   // Lire et compresser l'image
   var reader = new FileReader();
   reader.onload = function(e) {
@@ -2977,7 +3027,7 @@ function previewImg(input){
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       var dataUrl = canvas.toDataURL('image/jpeg', 0.80);
-      // Stocker l'image compressée en base64 (fiable, pas de dépendance Firebase)
+      // Stocker l'image compressée en base64
       _newImg = dataUrl;
       // Afficher l'apercu
       var prev = document.getElementById('pf-prev');
@@ -2985,14 +3035,11 @@ function previewImg(input){
         if (prev.tagName==='IMG') prev.src = dataUrl;
         else prev.outerHTML = '<img id="pf-prev" src="'+dataUrl+'" style="width:100%;height:110px;object-fit:cover;border-radius:8px;margin-top:.4rem">';
       }
-      // Débloquer le bouton immédiatement
-      if(btn) btn.disabled = false;
-      toast('Photo prête !','success',1500);
+      toast('Photo prête ! Cliquez Enregistrer.','success',2000);
     };
     img.onerror = function(){
       // Fallback sans compression
       _newImg = e.target.result;
-      if(btn) btn.disabled = false;
       toast('Photo prête !','success',1500);
     };
     img.src = e.target.result;
@@ -3055,7 +3102,19 @@ function saveNewProd(){
 }
 function saveEditProd(id){
   var p=getProducts().find(function(x){return x.id===id;});
-  if(p){var d=getProdFormData();Object.assign(p,d);if(_newImg)p.image=_newImg;saveProduct(p);}
+  if(p){
+    var d=getProdFormData();
+    var oldImage = p.image; // Garder l'image existante
+    var oldImageRef = p._imageRef;
+    Object.assign(p,d);
+    if(_newImg) {
+      p.image=_newImg; // Nouvelle image sélectionnée
+    } else {
+      p.image=oldImage; // Garder l'ancienne
+      if(oldImageRef) p._imageRef=oldImageRef;
+    }
+    saveProduct(p);
+  }
   _newImg=null; closeModal('m-product');
   toast('Produit modifie !','success');
   document.getElementById('admin-content').innerHTML=adminProducts();
