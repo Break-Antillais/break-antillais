@@ -886,7 +886,7 @@ function loadProductImages() {
         // Mettre à jour l'affichage si la carte est visible
         var wrap = document.getElementById('pwrap-'+p.id);
         if (wrap) {
-          wrap.outerHTML = '<div class="pcard-img"><img src="'+imgData+'" id="pimg-'+p.id+'" alt="'+p.name+'" style="cursor:zoom-in" onclick="showPhotoFullscreen(this.src,\''+p.name.replace(/\'/g,'')+'\')" /></div>';
+          wrap.outerHTML = '<div class="pcard-img"><img src="'+imgData+'" id="pimg-'+p.id+'" alt="'+p.name+'" /></div>';
         }
         var imgEl = document.getElementById('pimg-'+p.id);
         if (imgEl) imgEl.src = imgData;
@@ -1339,7 +1339,7 @@ function pcardHTML(p) {
   var _imgSrc = p.image && p.image.indexOf('__firebase__') === 0 ? null : p.image;
   var _imgId = 'pimg-' + p.id;
   var imgHtml = _imgSrc
-    ? '<div class="pcard-img"><img src="'+_imgSrc+'" id="'+_imgId+'" alt="'+p.name+'" onclick="showPhotoFullscreen(this.src,\'' + p.name.replace(/\'/g, '') + '\')" style="cursor:zoom-in"/></div>'
+    ? '<div class="pcard-img"><img src="'+_imgSrc+'" id="'+_imgId+'" alt="'+p.name+'"/></div>'
     : (p.image && p.image.indexOf('__firebase__') === 0)
       ? '<div class="pcard-img" id="pwrap-'+p.id+'"><div style="width:100%;height:100%;background:var(--dark4);display:flex;align-items:center;justify-content:center;font-size:1.5rem">'+(EMOJI[p.cat]||'🍽')+'</div></div>'
       : '<div class="pcard-img">'+(EMOJI[p.cat]||'\u{1F37D}')+'</div>';
@@ -1524,12 +1524,16 @@ function continueOpenProduct(id) {
   var mc = getMeatCount(p);
   var isBox = p.cat === 'mini_bokit';
   var needsConfig = ['bokit','crepe_salee','agoulou'].indexOf(p.cat)>=0;
+  var pSafeName = (p.name || '').replace(/\'/g, '');
+  var modalVisualHtml = (p.image && p.image.indexOf('__firebase__') !== 0)
+    ? '<img src="'+p.image+'" alt="'+p.name+'" onclick="showPhotoFullscreen(this.src,\''+pSafeName+'\')" style="width:84px;height:84px;object-fit:cover;border-radius:14px;display:block;margin:0 auto .55rem;cursor:zoom-in;border:1px solid var(--border)"/>'
+    : '<div style="text-align:center;font-size:2.8rem;margin-bottom:.4rem">'+(EMOJI[p.cat]||'🍽')+'</div>';
 
   var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
     +'<div class="modal" style="max-height:92vh;position:relative"><div class="modal-handle"></div>'
     +'<button onclick="closeModal(&apos;m-product&apos;)" style="position:absolute;top:.75rem;left:1rem;background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .7rem;border-radius:100px;font-weight:600;z-index:10">← Retour</button>'
     +'<div style="height:2rem"></div>'
-    +'<div style="text-align:center;font-size:2.8rem;margin-bottom:.4rem">'+(EMOJI[p.cat]||'🍽')+'</div>'
+    +modalVisualHtml
     +'<h2 class="modal-title text-center">'+p.name+'</h2>'
     +'<div style="text-align:center;font-family:var(--head);font-size:1.35rem;font-weight:800;color:var(--gold);margin-bottom:.4rem" id="modal-main-price">'+(p.isClassique?'—':fmt(p.price))+'</div>'
     +'<p style="text-align:center;font-size:.8rem;color:var(--muted);margin-bottom:.9rem">'+(p.desc||'')+'</p>';
@@ -4868,11 +4872,13 @@ function addRewardToCartByPalier(palierName) {
   var products = getProducts();
   choices.forEach(function(choiceName){
     var prod = products.find(function(p){ return p.name === choiceName && p.ok; });
-    var emoji = prod ? (EMOJI[prod.cat]||'🍽') : '🎁';
+    var choiceVisual = (prod && prod.image && prod.image.indexOf('__firebase__') !== 0)
+      ? '<img src="'+prod.image+'" alt="'+choiceName+'" onclick="event.stopPropagation();showPhotoFullscreen(this.src,\''+choiceName.replace(/\'/g,'')+'\')" style="width:42px;height:42px;border-radius:10px;object-fit:cover;cursor:zoom-in;border:1px solid var(--border)"/>'
+      : '<span style="font-size:1.8rem">'+(prod ? (EMOJI[prod.cat]||'🍽') : '🎁')+'</span>';
     var desc = prod ? prod.desc : '';
     html += '<div style="display:flex;align-items:center;gap:.85rem;padding:.75rem .9rem;background:var(--dark3);border:1.5px solid var(--border);border-radius:var(--radius-sm);cursor:pointer" '
       +'data-choice="'+choiceName+'" data-palier="'+palierName+'" onclick="confirmRewardChoice(this.dataset.choice, this.dataset.palier)">'
-      +'<span style="font-size:1.8rem">'+emoji+'</span>'
+      +choiceVisual
       +'<div style="flex:1">'
       +'<div class="fw-700 text-sm">'+choiceName+'</div>'
       +(desc?'<div style="font-size:.72rem;color:var(--muted)">'+desc+'</div>':'')
