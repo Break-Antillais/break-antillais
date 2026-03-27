@@ -173,9 +173,11 @@ body > *:not(#loading):not(#app-bg):not(nav) { position:relative; z-index:1; }
   background: var(--dark2); border: 1px solid var(--border);
   border-radius: var(--radius);
   width: 100%; max-width: 520px;
-  max-height: min(92dvh, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 84px));
-  max-height: min(92vh, calc(100vh - 84px));
+  max-height: min(88dvh, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 90px));
+  max-height: min(88vh, calc(100vh - 90px));
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 1.4rem; animation: slideUp .28s ease;
 }
 .modal-handle { width: 36px; height: 3px; background: var(--border); border-radius: 2px; margin: 0 auto 1.1rem; }
@@ -188,13 +190,13 @@ body > *:not(#loading):not(#app-bg):not(nav) { position:relative; z-index:1; }
 .modal-checkout .checkout-foot { padding:.9rem 1.2rem; border-top:1px solid var(--border); background:var(--dark2); flex-shrink:0; }
 
 /* Forcing modals to stay fully visible (no scroll) on small screens */
-.modal-fit-no-scroll { overflow: hidden !important; }
-.modal-fit-no-scroll .modal-scroll { overflow: hidden !important; }
+.modal-fit-no-scroll { overflow-y: auto !important; }
+.modal-fit-no-scroll .modal-scroll { overflow-y: auto !important; }
 
 @media (max-width: 640px) {
   .modal { border-radius: var(--radius) var(--radius) 0 0; }
 }
-@media (min-width: 768px) {
+@media (min-width: 1px) {
   .modal-overlay { align-items: center; }
 }
 
@@ -998,13 +1000,8 @@ function closeModal(id) {
 // Auto-fit the main modal to avoid any scroll on small screens.
 // Uses zoom (simpler than transform for layout in this page).
 function fitModalNoScroll(modalEl) {
-  if (!modalEl) return;
-  var vh = window.innerHeight || document.documentElement.clientHeight || 0;
-  var targetH = Math.max(320, vh - 96); // leave a little breathing room
-  var contentH = modalEl.scrollHeight || modalEl.offsetHeight || 0;
-  if (!contentH) return;
-  var scale = Math.min(1, targetH / contentH);
-  modalEl.style.zoom = (scale < 1) ? scale.toFixed(3) : '1';
+  // Pas de zoom — la modale est scrollable, rien à faire
+  if (modalEl) modalEl.style.zoom = '1';
 }
 function fitMainNoScrollModal() {
   var host = document.getElementById('m-product');
@@ -1555,7 +1552,7 @@ function continueOpenProduct(id) {
     : '<div style="text-align:center;font-size:2.8rem;margin-bottom:.4rem">'+(EMOJI[p.cat]||'🍽')+'</div>';
 
   var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
-    +'<div class="modal modal-fit-no-scroll" style="max-height:92vh;position:relative"><div class="modal-handle"></div>'
+    +'<div class="modal" style="position:relative"><div class="modal-handle"></div>'
     +'<button onclick="closeModal(&apos;m-product&apos;)" style="position:absolute;top:.75rem;left:1rem;background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .7rem;border-radius:100px;font-weight:600;z-index:10">← Retour</button>'
     +'<div style="height:2rem"></div>'
     +modalVisualHtml
