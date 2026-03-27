@@ -1552,9 +1552,10 @@ function continueOpenProduct(id) {
     : '<div style="text-align:center;font-size:2.8rem;margin-bottom:.4rem">'+(EMOJI[p.cat]||'🍽')+'</div>';
 
   var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
-    +'<div class="modal" style="position:relative"><div class="modal-handle"></div>'
-    +'<button onclick="closeModal(&apos;m-product&apos;)" style="position:absolute;top:.75rem;left:1rem;background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .7rem;border-radius:100px;font-weight:600;z-index:10">← Retour</button>'
-    +'<div style="height:2rem"></div>'
+    +'<div class="modal"><div class="modal-handle"></div>'
+    +'<div style="position:sticky;top:-1.4rem;z-index:20;background:var(--dark2);margin:-1.4rem -1.4rem .8rem;padding:.45rem 1rem .4rem;border-bottom:1px solid rgba(255,255,255,.08);">'
+    +'<button onclick="closeModal(&apos;m-product&apos;)" style="background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .75rem;border-radius:100px;font-weight:600;white-space:nowrap">← Retour</button>'
+    +'</div>'
     +modalVisualHtml
     +'<h2 class="modal-title text-center">'+p.name+'</h2>'
     +'<div style="text-align:center;font-family:var(--head);font-size:1.35rem;font-weight:800;color:var(--gold);margin-bottom:.4rem" id="modal-main-price">'+(p.isClassique?'—':fmt(p.price))+'</div>'
@@ -4971,9 +4972,10 @@ function showRewardConfig(productName, palierName, prod) {
   var mc = getMeatCount(prod||{name:productName});
   var m = document.getElementById('m-product');
   var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
-    +'<div class="modal" style="max-height:92vh;position:relative"><div class="modal-handle"></div>'
-    +'<button onclick="closeModal(&apos;m-product&apos;)" style="position:absolute;top:.75rem;left:1rem;background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .7rem;border-radius:100px;font-weight:600;z-index:10">← Retour</button>'
-    +'<div style="height:2rem"></div>'
+    +'<div class="modal"><div class="modal-handle"></div>'
+    +'<div style="position:sticky;top:-1.4rem;z-index:20;background:var(--dark2);margin:-1.4rem -1.4rem .8rem;padding:.45rem 1rem .4rem;border-bottom:1px solid rgba(255,255,255,.08);">'
+    +'<button onclick="closeModal(&apos;m-product&apos;)" style="background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .75rem;border-radius:100px;font-weight:600;white-space:nowrap">← Retour</button>'
+    +'</div>'
     +'<div style="text-align:center;font-size:2.5rem;margin-bottom:.4rem">'+(EMOJI[prod?prod.cat:'bokit']||'🍽')+'</div>'
     +'<h2 class="modal-title text-center">'+productName+'</h2>'
     +'<div style="text-align:center;background:rgba(45,158,95,.1);border:1px solid rgba(45,158,95,.3);border-radius:8px;padding:.4rem .8rem;display:inline-block;margin:0 auto .75rem;font-size:.85rem;color:#2d9e5f;font-weight:700">🎁 Offert — Palier '+palierName+'</div>';
