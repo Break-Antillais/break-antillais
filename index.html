@@ -2090,6 +2090,23 @@ function confirmOrder(){
     saveUser(user);
     _selectedReduction = null;
   }
+  // Deduct palier points if a palier reward is used
+  var rewardItem = cart.find(function(i){ return i.isReward && i.rewardPalier; });
+  if (rewardItem) {
+    var paliers = load('ba_paliers', PALIERS);
+    var rewardPal = paliers.find(function(p){ return p.name === rewardItem.rewardPalier; });
+    if (rewardPal) {
+      var palPts = rewardPal.pts || rewardPal.min || 0;
+      if (palPts > 0) {
+        user.points = Math.max(0, (user.points||0) - palPts);
+        var rHist = load('ba_pts_history_'+user.id, []);
+        rHist.unshift({pts:-palPts, label:'Recompense palier '+rewardItem.rewardPalier+' utilisee', at:new Date().toISOString()});
+        save('ba_pts_history_'+user.id, rHist);
+        db.ref('data/users/'+user.id+'/points').set(user.points);
+        saveUser(user);
+      }
+    }
+  }
   saveOrder(order);
   cart=[]; closeModal('m-product'); updateBadges();
   setTimeout(function(){
@@ -2506,8 +2523,10 @@ function renderAdmin(role){
   var isSup=role==='superadmin'||role==='admin';
   var isPrep=role==='preparateur';
   var tabs='<button class="admin-tab active" onclick="adminTab(&apos;orders&apos;,this)">📦 Commandes</button>';
-  if(isPrep) tabs+='<button class="admin-tab" onclick="adminTab(&apos;marketcodes&apos;,this)">🏪 Marche</button>';
+  if(isPrep) tabs+='<button class="admin-tab" onclick="adminTab(&apos;prepa&apos;,this)">🍽 Prepa</button>'
+    +'<button class="admin-tab" onclick="adminTab(&apos;marketcodes&apos;,this)">🏪 Marche</button>';
   if(isSup && !isPrep) tabs+='<button class="admin-tab" onclick="adminTab(&apos;products&apos;,this)">🍽 Produits</button>'
+    +'<button class="admin-tab" onclick="adminTab(&apos;prepa&apos;,this)">🍽 Prepa</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;stats&apos;,this)">📊 Stats</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;loyalty&apos;,this)">🎁 Fidelite</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;config&apos;,this)">⚙️ Config</button>'
@@ -2527,7 +2546,7 @@ function renderAdmin(role){
 function adminTab(tab, btn){
   document.querySelectorAll('.admin-tab').forEach(function(b){b.classList.remove('active');});
   btn.classList.add('active');
-  var fns={dashboard:adminDashboard,orders:adminOrders,products:adminProducts,stats:adminStats,loyalty:adminLoyalty,config:adminConfig,invoices:adminInvoices,marketcodes:adminMarketCodes,promocodes:adminPromoCodes};
+  var fns={dashboard:adminDashboard,orders:adminOrders,prepa:adminPrepa,products:adminProducts,stats:adminStats,loyalty:adminLoyalty,config:adminConfig,invoices:adminInvoices,marketcodes:adminMarketCodes,promocodes:adminPromoCodes};
   if(fns[tab]) document.getElementById('admin-content').innerHTML=fns[tab]();
 }
 
@@ -2737,6 +2756,118 @@ function toggleAdminAlert(btn) {
   btn.textContent = _adminAlertEnabled ? '🔔 Alertes ON' : '🔕 Alertes OFF';
   btn.style.color = _adminAlertEnabled ? '#10b981' : '#ef4444';
   toast('Alertes sonores '+ (_adminAlertEnabled?'activees':'desactivees'), 'info');
+}
+
+function adminPrepa() {
+  var today = new Date().toISOString().split('T')[0];
+  var activeStatus = ['pending','confirmed','preparing','ready'];
+  var orders = getOrders().filter(function(o) {
+    return o.pickupDate === today && activeStatus.indexOf(o.status) >= 0;
+  });
+
+  // Aggreger tous les produits
+  var counts = {}; // key = name, value = {name, cat, qty, details: []}
+  orders.forEach(function(o) {
+    (o.items || []).forEach(function(item) {
+      if (item.isReward) return; // ignorer les recompenses gratuites
+      var key = item.name;
+      if (!counts[key]) counts[key] = {name: item.name, cat: item.cat||'', qty: 0, details: [], orderNums: []};
+      counts[key].qty += (item.qty || 1);
+      if (item.details && item.details.trim()) counts[key].details.push(item.details);
+      if (o.orderNumber) counts[key].orderNums.push('N°'+o.orderNumber);
+    });
+  });
+
+  // Regrouper par categorie
+  var CAT_ORDER = ['bokit','agoulou','crepe_salee','crepe_sucree','mini_bokit','enfant','boisson'];
+  var CAT_LABELS = {bokit:'🫓 Bokits', agoulou:'🌯 Agoulous', crepe_salee:'🥞 Crêpes Salées',
+    crepe_sucree:'🍫 Crêpes Sucrées', mini_bokit:'📦 Mini Bokits', enfant:'🧒 Menus Enfants', boisson:'🥤 Boissons'};
+
+  var bycat = {};
+  Object.values(counts).forEach(function(p) {
+    var cat = p.cat || 'autre';
+    if (!bycat[cat]) bycat[cat] = [];
+    bycat[cat].push(p);
+  });
+
+  // Total commandes + total articles
+  var totalItems = Object.values(counts).reduce(function(s,p){return s+p.qty;},0);
+
+  var html = '<div style="padding:.75rem">';
+
+  // En-tête résumé
+  html += '<div class="sec-title">🍽 Récap Préparation — Aujourd\'hui</div>';
+  html += '<div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap">';
+  html += '<div class="card" style="flex:1;min-width:120px;text-align:center;padding:.75rem">';
+  html += '<div style="font-size:1.6rem;font-weight:800;color:var(--red)">' + orders.length + '</div>';
+  html += '<div class="text-muted" style="font-size:.75rem">commandes actives</div></div>';
+  html += '<div class="card" style="flex:1;min-width:120px;text-align:center;padding:.75rem">';
+  html += '<div style="font-size:1.6rem;font-weight:800;color:var(--gold)">' + totalItems + '</div>';
+  html += '<div class="text-muted" style="font-size:.75rem">articles au total</div></div>';
+  html += '</div>';
+
+  if (!orders.length) {
+    html += '<div class="empty-state" style="padding:2rem 0"><div class="icon">📭</div>';
+    html += '<div class="title">Aucune commande active aujourd\'hui</div></div>';
+    html += '</div>';
+    return html;
+  }
+
+  // Afficher par catégorie
+  var orderedCats = CAT_ORDER.filter(function(k){ return bycat[k] && bycat[k].length; });
+  var otherCats = Object.keys(bycat).filter(function(k){ return CAT_ORDER.indexOf(k)<0; });
+  orderedCats.concat(otherCats).forEach(function(cat) {
+    var items = bycat[cat].slice().sort(function(a,b){return b.qty-a.qty;});
+    var catTotal = items.reduce(function(s,p){return s+p.qty;},0);
+    var label = CAT_LABELS[cat] || ('📌 '+cat);
+    html += '<div class="sec-title" style="margin-top:1rem">' + label + ' <span style="color:var(--muted);font-weight:500;font-size:.8rem">(' + catTotal + ' au total)</span></div>';
+    html += '<div class="card" style="padding:0;overflow:hidden">';
+    items.forEach(function(p, i) {
+      var bg = i%2===0 ? 'background:var(--dark3)' : 'background:var(--dark2)';
+      html += '<div style="display:flex;align-items:center;gap:.75rem;padding:.65rem .9rem;' + bg + (i<items.length-1?';border-bottom:1px solid var(--border)':'')+'">';
+      // Quantité en gros
+      html += '<div style="font-family:var(--head);font-size:1.5rem;font-weight:900;color:var(--red);min-width:2.2rem;text-align:center">' + p.qty + '</div>';
+      html += '<div style="flex:1">';
+      html += '<div style="font-weight:700;font-size:.9rem">' + p.name + '</div>';
+      // Détails de personnalisation si présents
+      if (p.details.length) {
+        var uniq = p.details.filter(function(d,i,a){return a.indexOf(d)===i;});
+        uniq.forEach(function(d) {
+          var cnt = p.details.filter(function(x){return x===d;}).length;
+          html += '<div class="text-muted" style="font-size:.72rem;margin-top:.1rem">'+(cnt>1?'x'+cnt+' ':'')+d+'</div>';
+        });
+      }
+      html += '</div>';
+      // Numéros de commandes
+      html += '<div style="font-size:.68rem;color:var(--muted);text-align:right">' + p.orderNums.join(', ') + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+
+  // Vue par créneau horaire
+  html += '<div class="sec-title" style="margin-top:1.5rem">⏰ Par créneau</div>';
+  var bySlot = {};
+  orders.forEach(function(o) {
+    var slot = o.pickupTime || '?';
+    if (!bySlot[slot]) bySlot[slot] = {orders:[], total:0};
+    bySlot[slot].orders.push(o);
+    bySlot[slot].total += (o.items||[]).filter(function(i){return !i.isReward;}).length;
+  });
+  html += '<div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">';
+  Object.keys(bySlot).sort().forEach(function(slot) {
+    var s = bySlot[slot];
+    html += '<div class="card" style="flex:1;min-width:90px;text-align:center;padding:.6rem .5rem">';
+    html += '<div style="font-family:var(--head);font-weight:800;font-size:1rem;color:var(--gold)">' + slot + '</div>';
+    html += '<div style="font-size:.8rem;font-weight:700">' + s.orders.length + ' cmd</div>';
+    html += '<div class="text-muted" style="font-size:.7rem">' + s.total + ' articles</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  html += '<button class="btn btn-secondary btn-full mt-2" onclick="document.getElementById(\'admin-content\').innerHTML=adminPrepa()" style="font-size:.8rem">🔄 Actualiser</button>';
+  html += '</div>';
+  return html;
 }
 
 function adminOrders(){
@@ -3793,7 +3924,12 @@ function savePtsCfg(){
   var cfg=getCfg();
   cfg.signupPts=parseInt(document.getElementById('cfg-sp').value)||50;
   cfg.ptsPerEuro=parseInt(document.getElementById('cfg-pp').value)||10;
-  save('ba_cfg',cfg); toast('Enregistre','success');
+  save('ba_cfg',cfg); toast('Enregistre !','success');
+  // Recharger les ecrans dynamiques pour refléter le nouveau taux
+  var sc = document.querySelector('.screen.active');
+  if (sc && sc.id === 's-cart') renderCart();
+  if (sc && sc.id === 's-account') renderProfile();
+  if (sc && sc.id === 's-home') renderHome();
 }
 function savePaliers(){
   var paliers=load('ba_paliers', PALIERS);
@@ -4877,8 +5013,8 @@ function addRewardToCartByPalier(palierName) {
   var user = getCurrentUser();
   if (!user) { toast('Connectez-vous pour utiliser vos recompenses','warning'); return; }
 
-  var alreadyIn = cart.find(function(i){ return i.isReward && i.rewardPalier===palierName; });
-  if (alreadyIn) { toast('Cette recompense est deja dans votre panier','warning'); return; }
+  var alreadyIn = cart.find(function(i){ return i.isReward; });
+  if (alreadyIn) { toast('Une recompense est deja dans votre panier. Une seule recompense par commande.','warning'); return; }
 
   var paliers = load('ba_paliers', PALIERS);
   var pal = paliers.find(function(p){ return p.name===palierName; });
