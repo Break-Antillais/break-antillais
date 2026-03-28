@@ -660,7 +660,8 @@ function startFirebaseListeners() {
           var pts = curUser.points || 0;
           var paliers = load('ba_paliers', []);
           paliers.forEach(function(p) {
-            if (pts >= p.min && pts - (update.pts||0) < p.min) {
+            var pSeuil = p.pts||p.min||0;
+            if (pts >= pSeuil && pts - (update.pts||0) < pSeuil) {
               launchConfetti(4000);
               toast('🎉 Félicitations ! Vous atteignez le palier ' + p.name + ' !', 'success', 5000);
             }
@@ -732,16 +733,16 @@ var STATUTS = {
   cancelled: {label:'Annulee',       icon:'❌', color:'#ef4444'}
 };
 var PALIERS = [
-  {name:'Bronze',  min:0,    max:319,   color:'#cd7f32', icon:'🥉', reward:'', rewardShort:'', threshold:'0€', choices:[]},
-  {name:'Argent',  min:320,  max:639,   color:'#c0c0c0', icon:'🥈', reward:'1 produit offert au choix', rewardShort:'🎁 Offert', threshold:'30€',
+  {name:'Bronze',  pts:0,    color:'#cd7f32', icon:'🥉', reward:'', rewardShort:'', choices:[]},
+  {name:'Argent',  pts:300,  color:'#c0c0c0', icon:'🥈', reward:'1 produit offert au choix', rewardShort:'🎁 Offert',
    choices:['Eau plate','Coca-Cola','Colorado Peche Mangue','Colorado Peche Menthe','Royal Soda Kampagne','Royal Soda Grenadine']},
-  {name:'Or',      min:640,  max:959,   color:'#D4AF37', icon:'🥇', reward:'1 produit offert au choix', rewardShort:'🎁 Offert', threshold:'60€',
+  {name:'Or',      pts:600,  color:'#D4AF37', icon:'🥇', reward:'1 produit offert au choix', rewardShort:'🎁 Offert',
    choices:['Crepe Nutella','Crepe Caramel Beurre Sale','Eau plate','Coca-Cola','Colorado Peche Mangue','Colorado Peche Menthe','Royal Soda Kampagne','Royal Soda Grenadine']},
-  {name:'Diamant', min:960,  max:1279,  color:'#b9f2ff', icon:'💎', reward:'1 produit offert au choix', rewardShort:'🎁 Offert', threshold:'90€',
+  {name:'Diamant', pts:900,  color:'#b9f2ff', icon:'💎', reward:'1 produit offert au choix', rewardShort:'🎁 Offert',
    choices:['Bokit Jambon Fromage','Bokit Poulet','Bokit Steak','Bokit Thon Crudites','Bokit Saucisse Fromage','Bokit Merguez','Bokit Kebab','Crepe Nutella','Crepe Caramel Beurre Sale']},
-  {name:'Platine', min:1280, max:1679,  color:'#e5e4e2', icon:'💠', reward:'1 produit offert au choix', rewardShort:'🎁 Offert', threshold:'120€',
+  {name:'Platine', pts:1200, color:'#e5e4e2', icon:'💠', reward:'1 produit offert au choix', rewardShort:'🎁 Offert',
    choices:['Bokit Jambon Fromage','Bokit Poulet','Bokit Steak','Bokit Thon Crudites','Bokit Saucisse Fromage','Bokit Merguez','Bokit Kebab','Crepe Nutella','Crepe Caramel Beurre Sale','Crepe Jambon Fromage']},
-  {name:'VIP',     min:1680, max:99999, color:'#ff6b6b', icon:'👑', reward:'1 produit offert au choix', rewardShort:'🎁 Offert', threshold:'160€',
+  {name:'VIP',     pts:1600, color:'#ff6b6b', icon:'👑', reward:'1 produit offert au choix', rewardShort:'🎁 Offert',
    choices:['Bokit Jambon Fromage','Bokit Poulet','Bokit Steak','Bokit Thon Crudites','Bokit Saucisse Fromage','Bokit Merguez','Bokit Kebab','Crepe Nutella','Crepe Caramel Beurre Sale','Crepe Jambon Fromage','Coca-Cola','Eau plate']}
 ];
 
@@ -979,8 +980,9 @@ function notify(userId, title, body) {
 }
 function getPalier(pts) {
   var paliers = load('ba_paliers', PALIERS);
+  paliers = paliers.slice().sort(function(a,b){return (a.pts||a.min||0)-(b.pts||b.min||0);});
   var p = paliers[0];
-  for (var i=0; i<paliers.length; i++) { if (pts >= paliers[i].min) p = paliers[i]; }
+  for (var i=0; i<paliers.length; i++) { if (pts >= (paliers[i].pts||paliers[i].min||0)) p = paliers[i]; }
   return p;
 }
 
@@ -2414,8 +2416,10 @@ function renderProfile(){
   var spent=orders.reduce(function(s,o){return s+o.total;},0);
   var palier=getPalier(pts);
   var _paliers=load('ba_paliers',PALIERS);
-  var nextP=_paliers.find(function(p){return p.min>pts;})||null;
-  var progress=nextP?Math.min(100,Math.round((pts-palier.min)/(nextP.min-palier.min)*100)):100;
+  var nextP=_paliers.filter(function(p){return (p.pts||p.min||0)>pts;}).sort(function(a,b){return (a.pts||a.min||0)-(b.pts||b.min||0);})[0]||null;
+  var curPts=palier.pts||palier.min||0;
+  var nextPts=nextP?(nextP.pts||nextP.min||0):curPts;
+  var progress=nextP?Math.min(100,Math.round((pts-curPts)/(nextPts-curPts)*100)):100;
   var html=header('Mon Profil')+'<div style="padding:1rem 1rem 5rem">';
   // Info
   html+='<div class="card mb-2" style="display:flex;align-items:center;gap:1rem">'
@@ -2442,7 +2446,7 @@ function renderProfile(){
   html += '<div class="sec-title" style="margin-top:1.25rem">Programme Fidelite</div>';
   _palList.forEach(function(p){
     var active = palier.name===p.name;
-    var unlocked = pts>=p.min;
+    var unlocked = pts>=(p.pts||p.min||0);
     var hasReward = p.reward && p.name!=='Bronze';
     html += '<div style="display:flex;align-items:center;gap:.75rem;padding:.85rem .9rem;'
       +'background:'+(active?'rgba(200,35,43,.08)':'var(--dark3)')
@@ -3733,8 +3737,8 @@ function adminLoyalty(){
       +'<div style="flex:1">'
       +'<input class="form-input" id="pal-name-'+i+'" value="'+p.name+'" style="margin-bottom:.35rem;font-weight:700;color:'+p.color+'" placeholder="Nom"/>'
       +'<div style="display:flex;gap:.5rem">'
-      +'<input class="form-input" id="pal-min-'+i+'" type="number" value="'+p.min+'" placeholder="Min pts" style="flex:1"/>'
-      +'<input class="form-input" id="pal-max-'+i+'" type="number" value="'+p.max+'" placeholder="Max pts" style="flex:1"/>'
+      +'<input class="form-input" id="pal-pts-'+i+'" type="number" value="'+(p.pts||p.min||0)+'" placeholder="Seuil (pts)" style="flex:1"/>'
+      +'<span class="text-muted" style="font-size:.75rem;padding:.4rem .2rem;white-space:nowrap">pts pour debloquer</span>'
       +'</div>'
       +'<input class="form-input" id="pal-reward-'+i+'" value="'+(p.reward||'')+'" placeholder="Description (ex: 1 produit offert au choix)" style="margin-top:.35rem"/>'      +'<div style="margin-top:.5rem"><label class="form-label" style="font-size:.68rem">Produits proposés (cochés = disponibles)</label>'
       +'<div id="pal-choices-wrap-'+i+'" style="display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.3rem">'+buildChoicesCheckboxes(i, p.choices||[])+'</div></div>'
@@ -3796,8 +3800,7 @@ function savePaliers(){
   var updated=[];
   for(var i=0;i<paliers.length;i++){
     var name=document.getElementById('pal-name-'+i);
-    var min=document.getElementById('pal-min-'+i);
-    var max=document.getElementById('pal-max-'+i);
+    var ptsEl=document.getElementById('pal-pts-'+i);
     var icon=document.getElementById('pal-icon-'+i);
     var color=document.getElementById('pal-color-'+i);
     if(!name) continue;
@@ -3809,8 +3812,7 @@ function savePaliers(){
     if (!choicesArr.length) choicesArr = paliers[i].choices||[];
     updated.push({
       name:name.value.trim()||paliers[i].name,
-      min:parseInt(min.value)||paliers[i].min,
-      max:parseInt(max.value)||paliers[i].max,
+      pts:parseInt(ptsEl?ptsEl.value:0)||paliers[i].pts||paliers[i].min||0,
       icon:icon.value.trim()||paliers[i].icon,
       color:color.value||paliers[i].color,
       reward:reward?reward.value.trim():'',
@@ -3818,14 +3820,14 @@ function savePaliers(){
       threshold:paliers[i].threshold||''
     });
   }
-  updated.sort(function(a,b){return a.min-b.min;});
+  updated.sort(function(a,b){return (a.pts||0)-(b.pts||0);});
   save('ba_paliers', updated);
   toast('Paliers enregistres !','success');
   document.getElementById('admin-content').innerHTML=adminLoyalty();
 }
 function addPalier(){
   var paliers=load('ba_paliers', PALIERS);
-  paliers.push({name:'Nouveau',min:0,max:9999,icon:'⭐',color:'#ffffff'});
+  paliers.push({name:'Nouveau',pts:0,icon:'⭐',color:'#ffffff',reward:'',choices:[]});
   save('ba_paliers', paliers);
   document.getElementById('admin-content').innerHTML=adminLoyalty();
   toast('Palier ajoute','info');
