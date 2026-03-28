@@ -802,6 +802,9 @@ var cart = [];
 var currentScreen = 'home';
 var pendingProd = null;
 var pendingExtras = {meats:[], sauces:[], crudites:[], supplements:[]};
+var _manualCart = [];
+var _manualOrderMode = false;
+var _manualOrderData = {prenom:'', phone:'', slot:'', payment:'Especes'};
 var _slot = null;
 var _payment = null;
 var _boxQtys = {};
@@ -1795,6 +1798,16 @@ function addToCart() {
     cartName = 'Bokit '+pendingExtras.meats[0];
   }
   var qtyToAdd = _pendingQty || 1;
+  // Mode commande manuelle admin
+  if (_manualOrderMode) {
+    for (var qi = 0; qi < qtyToAdd; qi++) {
+      _manualCart.push({id:genId(),pid:pendingProd.id,name:cartName,price:finalPrice,cat:pendingProd.cat,details:details.join(' | '),qty:1});
+    }
+    var qtyMsg2 = qtyToAdd > 1 ? ' x'+qtyToAdd : '';
+    toast(cartName+qtyMsg2+' ajouté au panier','success',1500);
+    renderManualOrderModal();
+    return;
+  }
   for (var qi = 0; qi < qtyToAdd; qi++) {
     cart.push({id:genId(),pid:pendingProd.id,name:cartName,price:finalPrice,cat:pendingProd.cat,details:details.join(' | '),qty:1});
   }
@@ -2759,29 +2772,38 @@ function toggleAdminAlert(btn) {
 }
 
 function adminPrepa() {
-  var today = new Date().toISOString().split('T')[0];
+  // Toutes les commandes actives (non annulees, non recuperees) peu importe la date
+  var allOrders = getOrders();
   var activeStatus = ['pending','confirmed','preparing','ready'];
-  var orders = getOrders().filter(function(o) {
-    return o.pickupDate === today && activeStatus.indexOf(o.status) >= 0;
+  var orders = allOrders.filter(function(o) {
+    return activeStatus.indexOf(o.status) >= 0;
   });
 
   // Aggreger tous les produits
-  var counts = {}; // key = name, value = {name, cat, qty, details: []}
+  var counts = {};
   orders.forEach(function(o) {
     (o.items || []).forEach(function(item) {
-      if (item.isReward) return; // ignorer les recompenses gratuites
+      if (item.isReward) return;
       var key = item.name;
       if (!counts[key]) counts[key] = {name: item.name, cat: item.cat||'', qty: 0, details: [], orderNums: []};
       counts[key].qty += (item.qty || 1);
-      if (item.details && item.details.trim()) counts[key].details.push(item.details);
-      if (o.orderNumber) counts[key].orderNums.push('N°'+o.orderNumber);
+      if (item.details && item.details.trim()) {
+        for (var q = 0; q < (item.qty||1); q++) counts[key].details.push(item.details);
+      }
+      if (o.orderNumber) counts[key].orderNums.push('N\u00b0'+o.orderNumber);
     });
   });
 
-  // Regrouper par categorie
   var CAT_ORDER = ['bokit','agoulou','crepe_salee','crepe_sucree','mini_bokit','enfant','boisson'];
-  var CAT_LABELS = {bokit:'🫓 Bokits', agoulou:'🌯 Agoulous', crepe_salee:'🥞 Crêpes Salées',
-    crepe_sucree:'🍫 Crêpes Sucrées', mini_bokit:'📦 Mini Bokits', enfant:'🧒 Menus Enfants', boisson:'🥤 Boissons'};
+  var CAT_LABELS = {
+    bokit:       '\U0001f953 Bokits',
+    agoulou:     '\U0001f32f Agoulous',
+    crepe_salee: '\U0001f95e Cr\u00e8pes Sal\u00e9es',
+    crepe_sucree:'\U0001f36b Cr\u00e8pes Sucr\u00e9es',
+    mini_bokit:  '\U0001f4e6 Mini Bokits',
+    enfant:      '\U0001f9d2 Menus Enfants',
+    boisson:     '\U0001f964 Boissons'
+  };
 
   var bycat = {};
   Object.values(counts).forEach(function(p) {
@@ -2790,87 +2812,271 @@ function adminPrepa() {
     bycat[cat].push(p);
   });
 
-  // Total commandes + total articles
   var totalItems = Object.values(counts).reduce(function(s,p){return s+p.qty;},0);
 
   var html = '<div style="padding:.75rem">';
+  html += '<div class="sec-title">\U0001f374 R\u00e9cap Pr\u00e9paration \u2014 Commandes actives</div>';
 
-  // En-tête résumé
-  html += '<div class="sec-title">🍽 Récap Préparation — Aujourd\'hui</div>';
-  html += '<div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap">';
-  html += '<div class="card" style="flex:1;min-width:120px;text-align:center;padding:.75rem">';
-  html += '<div style="font-size:1.6rem;font-weight:800;color:var(--red)">' + orders.length + '</div>';
-  html += '<div class="text-muted" style="font-size:.75rem">commandes actives</div></div>';
-  html += '<div class="card" style="flex:1;min-width:120px;text-align:center;padding:.75rem">';
-  html += '<div style="font-size:1.6rem;font-weight:800;color:var(--gold)">' + totalItems + '</div>';
-  html += '<div class="text-muted" style="font-size:.75rem">articles au total</div></div>';
+  // Bandeau résumé
+  html += '<div style="display:flex;gap:.5rem;margin-bottom:1rem">';
+  html += '<div class="card" style="flex:1;text-align:center;padding:.75rem">';
+  html += '<div style="font-size:1.8rem;font-weight:900;color:var(--red)">' + orders.length + '</div>';
+  html += '<div class="text-muted" style="font-size:.73rem">commandes</div></div>';
+  html += '<div class="card" style="flex:1;text-align:center;padding:.75rem">';
+  html += '<div style="font-size:1.8rem;font-weight:900;color:var(--gold)">' + totalItems + '</div>';
+  html += '<div class="text-muted" style="font-size:.73rem">articles</div></div>';
   html += '</div>';
 
   if (!orders.length) {
-    html += '<div class="empty-state" style="padding:2rem 0"><div class="icon">📭</div>';
-    html += '<div class="title">Aucune commande active aujourd\'hui</div></div>';
+    html += '<div class="empty-state" style="padding:2rem 0"><div class="icon">\U0001f4ed</div>';
+    html += '<div class="title">Aucune commande active</div></div>';
     html += '</div>';
     return html;
   }
 
   // Afficher par catégorie
   var orderedCats = CAT_ORDER.filter(function(k){ return bycat[k] && bycat[k].length; });
-  var otherCats = Object.keys(bycat).filter(function(k){ return CAT_ORDER.indexOf(k)<0; });
+  var otherCats   = Object.keys(bycat).filter(function(k){ return CAT_ORDER.indexOf(k)<0; });
+
   orderedCats.concat(otherCats).forEach(function(cat) {
-    var items = bycat[cat].slice().sort(function(a,b){return b.qty-a.qty;});
+    var items    = bycat[cat].slice().sort(function(a,b){return b.qty-a.qty;});
     var catTotal = items.reduce(function(s,p){return s+p.qty;},0);
-    var label = CAT_LABELS[cat] || ('📌 '+cat);
-    html += '<div class="sec-title" style="margin-top:1rem">' + label + ' <span style="color:var(--muted);font-weight:500;font-size:.8rem">(' + catTotal + ' au total)</span></div>';
+    var label    = CAT_LABELS[cat] || ('\U0001f4cc '+cat);
+
+    html += '<div class="sec-title" style="margin-top:1rem">' + label;
+    html += ' <span style="color:var(--muted);font-weight:500;font-size:.78rem">(' + catTotal + ')</span></div>';
     html += '<div class="card" style="padding:0;overflow:hidden">';
+
     items.forEach(function(p, i) {
       var bg = i%2===0 ? 'background:var(--dark3)' : 'background:var(--dark2)';
-      html += '<div style="display:flex;align-items:center;gap:.75rem;padding:.65rem .9rem;' + bg + (i<items.length-1?';border-bottom:1px solid var(--border)':'')+'">';
-      // Quantité en gros
-      html += '<div style="font-family:var(--head);font-size:1.5rem;font-weight:900;color:var(--red);min-width:2.2rem;text-align:center">' + p.qty + '</div>';
+      var border = i < items.length-1 ? ';border-bottom:1px solid var(--border)' : '';
+      html += '<div style="display:flex;align-items:flex-start;gap:.75rem;padding:.7rem .9rem;' + bg + border + '">';
+
+      // Quantité
+      html += '<div style="font-family:var(--head);font-size:1.6rem;font-weight:900;color:var(--red);min-width:2.2rem;text-align:center;line-height:1.2">' + p.qty + '</div>';
+
+      // Nom + détails
       html += '<div style="flex:1">';
       html += '<div style="font-weight:700;font-size:.9rem">' + p.name + '</div>';
-      // Détails de personnalisation si présents
       if (p.details.length) {
-        var uniq = p.details.filter(function(d,i,a){return a.indexOf(d)===i;});
-        uniq.forEach(function(d) {
-          var cnt = p.details.filter(function(x){return x===d;}).length;
-          html += '<div class="text-muted" style="font-size:.72rem;margin-top:.1rem">'+(cnt>1?'x'+cnt+' ':'')+d+'</div>';
+        // Compter les combinaisons identiques
+        var detailMap = {};
+        p.details.forEach(function(d){ detailMap[d] = (detailMap[d]||0)+1; });
+        Object.keys(detailMap).forEach(function(d) {
+          var cnt = detailMap[d];
+          html += '<div class="text-muted" style="font-size:.72rem;margin-top:.15rem">';
+          html += (cnt>1 ? '<strong style="color:var(--text)">x'+cnt+'</strong> ' : '') + d;
+          html += '</div>';
         });
       }
       html += '</div>';
+
       // Numéros de commandes
-      html += '<div style="font-size:.68rem;color:var(--muted);text-align:right">' + p.orderNums.join(', ') + '</div>';
+      html += '<div style="font-size:.68rem;color:var(--muted);text-align:right;padding-top:.15rem">' + p.orderNums.join(', ') + '</div>';
       html += '</div>';
     });
     html += '</div>';
   });
 
-  // Vue par créneau horaire
-  html += '<div class="sec-title" style="margin-top:1.5rem">⏰ Par créneau</div>';
-  var bySlot = {};
-  orders.forEach(function(o) {
-    var slot = o.pickupTime || '?';
-    if (!bySlot[slot]) bySlot[slot] = {orders:[], total:0};
-    bySlot[slot].orders.push(o);
-    bySlot[slot].total += (o.items||[]).filter(function(i){return !i.isReward;}).length;
-  });
-  html += '<div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">';
-  Object.keys(bySlot).sort().forEach(function(slot) {
-    var s = bySlot[slot];
-    html += '<div class="card" style="flex:1;min-width:90px;text-align:center;padding:.6rem .5rem">';
-    html += '<div style="font-family:var(--head);font-weight:800;font-size:1rem;color:var(--gold)">' + slot + '</div>';
-    html += '<div style="font-size:.8rem;font-weight:700">' + s.orders.length + ' cmd</div>';
-    html += '<div class="text-muted" style="font-size:.7rem">' + s.total + ' articles</div>';
-    html += '</div>';
-  });
-  html += '</div>';
-
-  html += '<button class="btn btn-secondary btn-full mt-2" onclick="document.getElementById(\'admin-content\').innerHTML=adminPrepa()" style="font-size:.8rem">🔄 Actualiser</button>';
+  html += '<button class="btn btn-secondary btn-full mt-2" onclick="document.getElementById(\'admin-content\').innerHTML=adminPrepa()" style="font-size:.8rem">\U0001f504 Actualiser</button>';
   html += '</div>';
   return html;
 }
 
+
+
+function openManualOrder() {
+  _manualCart = [];
+  _manualOrderMode = true;
+  _manualOrderData = {prenom:'', phone:'', slot:'', payment:'Especes'};
+  renderManualOrderModal();
+}
+
+function renderManualOrderModal() {
+  var cfg = getCfg();
+  var today = new Date().toISOString().split('T')[0];
+  var slots = getSlots(today, cfg);
+  var CAT_LABELS = {bokit:'🫓 Bokits',agoulou:'🌯 Agoulous',crepe_salee:'🥞 Crêpes Salées',crepe_sucree:'🍫 Crêpes Sucrées',mini_bokit:'📦 Mini Bokits',enfant:'🧒 Enfants',boisson:'🥤 Boissons'};
+  var catOrder = ['bokit','agoulou','crepe_salee','crepe_sucree','mini_bokit','enfant','boisson'];
+  var products = getProducts().filter(function(p){ return p.ok !== false; });
+  var bycat = {};
+  products.forEach(function(p){ if (!bycat[p.cat]) bycat[p.cat]=[]; bycat[p.cat].push(p); });
+
+  var slotsHtml = '<option value="">-- Heure de retrait --</option>';
+  slots.forEach(function(s){ slotsHtml += '<option value="'+s.time+'"'+(s.time===_manualOrderData.slot?' selected':'')+'>'+s.time+'</option>'; });
+
+  // Récap panier en cours
+  var cartHtml = '';
+  if (_manualCart.length) {
+    var counts = {};
+    _manualCart.forEach(function(i){ var k = i.name+(i.details?'|'+i.details:''); if(!counts[k])counts[k]={name:i.name,details:i.details,price:i.price,qty:0}; counts[k].qty++; });
+    cartHtml = '<div class="sec-title" style="margin-top:.5rem">🛒 Panier ('+ _manualCart.length +')</div><div class="card" style="padding:.5rem .75rem;margin-bottom:.75rem">';
+    Object.values(counts).forEach(function(it){
+      cartHtml += '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.05)">';
+      cartHtml += '<div style="flex:1"><div style="font-size:.85rem;font-weight:600">'+(it.qty>1?it.qty+'× ':'')+it.name+'</div>';
+      if (it.details) cartHtml += '<div style="font-size:.7rem;color:var(--muted)">'+it.details+'</div>';
+      cartHtml += '</div>';
+      cartHtml += '<div style="display:flex;align-items:center;gap:.4rem">';
+      cartHtml += '<span style="color:var(--gold);font-size:.82rem">'+(it.price*it.qty).toFixed(2)+'€</span>';
+      cartHtml += '<button onclick="moRemoveItem(\''+it.name.replace(/'/g,'&apos;')+'\')" style="background:rgba(200,35,43,.2);border:none;color:#ef4444;border-radius:4px;padding:.1rem .35rem;cursor:pointer;font-size:.75rem">✕</button>';
+      cartHtml += '</div></div>';
+    });
+    var total = _manualCart.reduce(function(s,i){return s+i.price;},0);
+    cartHtml += '<div style="display:flex;justify-content:space-between;padding:.4rem 0;font-weight:800"><span>Total</span><span style="color:var(--gold)">'+total.toFixed(2)+'€</span></div>';
+    cartHtml += '</div>';
+  }
+
+  // Liste produits avec bouton +
+  var prodsHtml = '';
+  catOrder.forEach(function(cat){
+    if (!bycat[cat]||!bycat[cat].length) return;
+    prodsHtml += '<div style="font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;margin:.75rem 0 .3rem">'+(CAT_LABELS[cat]||cat)+'</div>';
+    bycat[cat].forEach(function(p){
+      var needsConfig = ['bokit','crepe_salee','agoulou'].indexOf(p.cat)>=0;
+      prodsHtml += '<div style="display:flex;align-items:center;gap:.5rem;padding:.35rem 0;border-bottom:1px solid rgba(255,255,255,.05)">';
+      prodsHtml += '<div style="flex:1;font-size:.85rem">'+p.name+'<span style="color:var(--gold);font-size:.75rem;margin-left:.4rem">'+p.price.toFixed(2)+'€</span></div>';
+      if (needsConfig) {
+        prodsHtml += '<button onclick="moConfigProduct(\''+p.id+'\')" style="background:var(--red);border:none;color:#fff;border-radius:6px;padding:.3rem .7rem;cursor:pointer;font-size:.8rem;font-weight:700">+ Config</button>';
+      } else {
+        prodsHtml += '<button onclick="moAddSimple(\''+p.id+'\',\''+p.name.replace(/'/g,'&apos;')+'\','+p.price+',\''+p.cat+'\')" style="background:var(--red);border:none;color:#fff;border-radius:6px;padding:.3rem .7rem;cursor:pointer;font-size:.8rem;font-weight:700">+</button>';
+      }
+      prodsHtml += '</div>';
+    });
+  });
+
+  var m = document.getElementById('m-product');
+  var html = '<div class="modal-overlay" onclick="if(event.target===this){_manualOrderMode=false;closeModal(&apos;m-product&apos;)}">'
+    +'<div class="modal">'
+    +'<div style="position:sticky;top:-1.4rem;z-index:20;background:var(--dark2);margin:-1.4rem -1.4rem .8rem;padding:.55rem 1rem .45rem;border-bottom:1px solid rgba(255,255,255,.08)">'
+    +'<button onclick="_manualOrderMode=false;closeModal(&apos;m-product&apos;)" style="background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .75rem;border-radius:100px;font-weight:600;white-space:nowrap">← Retour</button>'
+    +'</div>'
+    +'<h2 class="modal-title">📝 Commande client</h2>'
+    +'<div class="form-group"><label class="form-label">Prénom client *</label>'
+    +'<input class="form-input" id="mo-prenom" placeholder="Ex: Michel" value="'+_manualOrderData.prenom+'" oninput="_manualOrderData.prenom=this.value"/></div>'
+    +'<div class="form-group"><label class="form-label">Téléphone (pour SMS)</label>'
+    +'<input class="form-input" id="mo-phone" type="tel" placeholder="Ex: 0612345678" value="'+_manualOrderData.phone+'" oninput="_manualOrderData.phone=this.value"/></div>'
+    +'<div class="form-group"><label class="form-label">Heure de retrait *</label>'
+    +'<select class="form-select" id="mo-slot" onchange="_manualOrderData.slot=this.value">'+slotsHtml+'</select></div>'
+    +'<div class="form-group"><label class="form-label">Règlement</label>'
+    +'<div style="display:flex;gap:.5rem">'
+    +'<button class="btn btn-secondary" id="mo-pay-esp" onclick="moSetPay(\'Especes\')" style="flex:1;'+(( _manualOrderData.payment==='Especes')?'background:var(--red)':'')+'" >💵 Espèces</button>'
+    +'<button class="btn btn-secondary" id="mo-pay-card" onclick="moSetPay(\'Carte\')" style="flex:1;'+((_manualOrderData.payment==='Carte')?'background:var(--red)':'')+'" >💳 Carte</button>'
+    +'</div></div>'
+    + cartHtml
+    +'<div class="form-group"><label class="form-label">Ajouter des produits</label>'
+    +prodsHtml+'</div>'
+    +(_manualCart.length ? '<button class="btn btn-primary btn-full mt-2" onclick="submitManualOrder()">✅ Valider la commande</button>' : '')
+    +'</div></div>';
+  m.innerHTML = html; m.style.display = 'block';
+}
+
+function moSetPay(val) {
+  _manualOrderData.payment = val;
+  renderManualOrderModal();
+}
+
+function moAddSimple(pid, pname, pprice, pcat) {
+  _manualOrderData.prenom = (document.getElementById('mo-prenom')||{}).value || _manualOrderData.prenom;
+  _manualOrderData.phone  = (document.getElementById('mo-phone')||{}).value  || _manualOrderData.phone;
+  _manualOrderData.slot   = (document.getElementById('mo-slot')||{}).value   || _manualOrderData.slot;
+  _manualCart.push({id:genId(), pid:pid, name:pname, price:pprice, cat:pcat, details:'', qty:1});
+  toast(pname+' ajouté','success',1500);
+  renderManualOrderModal();
+}
+
+function moRemoveItem(name) {
+  var idx = _manualCart.findIndex(function(i){ return i.name===name; });
+  if (idx>=0) _manualCart.splice(idx,1);
+  renderManualOrderModal();
+}
+
+function moConfigProduct(pid) {
+  _manualOrderData.prenom = (document.getElementById('mo-prenom')||{}).value || _manualOrderData.prenom;
+  _manualOrderData.phone  = (document.getElementById('mo-phone')||{}).value  || _manualOrderData.phone;
+  _manualOrderData.slot   = (document.getElementById('mo-slot')||{}).value   || _manualOrderData.slot;
+  // Ouvrir la modale de config produit — addToCart() détectera _manualOrderMode
+  continueOpenProduct(pid);
+}
+
+function submitManualOrder() {
+  _manualOrderData.prenom = (document.getElementById('mo-prenom')||{}).value || _manualOrderData.prenom;
+  _manualOrderData.phone  = (document.getElementById('mo-phone')||{}).value  || _manualOrderData.phone;
+  _manualOrderData.slot   = (document.getElementById('mo-slot')||{}).value   || _manualOrderData.slot;
+  var prenom = _manualOrderData.prenom.trim();
+  var phone  = _manualOrderData.phone.trim();
+  var slot   = _manualOrderData.slot.trim();
+  if (!prenom) { toast('Entrez le prénom du client','warning'); return; }
+  if (!slot)   { toast('Choisissez un créneau','warning'); return; }
+  if (!_manualCart.length) { toast('Ajoutez au moins un produit','warning'); return; }
+  var cfg    = getCfg();
+  var orders = getOrders();
+  var num    = String(orders.length+1).padStart(4,'0');
+  var today  = new Date().toISOString().split('T')[0];
+  var total  = _manualCart.reduce(function(s,i){return s+i.price;},0);
+  var order  = {
+    id:genId(), orderNumber:num,
+    userId:'guest-'+genId(), userPrenom:prenom, userPhone:phone,
+    items:_manualCart.slice(), total:total, originalTotal:total,
+    pickupDate:today, pickupTime:slot,
+    payment:_manualOrderData.payment||'Especes',
+    status:'confirmed', createdAt:new Date().toISOString(),
+    pointsAwarded:false, manualEntry:true
+  };
+  saveOrder(order);
+  db.ref('data/ba_orders/'+order.id).set(order);
+  _manualOrderMode = false;
+  _manualCart = [];
+  closeModal('m-product');
+  toast('Commande N°'+num+' créée !','success',3000);
+  document.getElementById('admin-content').innerHTML = adminOrders();
+  showManualOrderMsg(order, cfg);
+}
+
+function showManualOrderMsg(order, cfg) {
+  var APP_URL = 'https://break-antillais.github.io/break-antillais';
+  var counts = {};
+  order.items.forEach(function(i){ counts[i.name]=(counts[i.name]||0)+1; });
+  var lines = Object.keys(counts).map(function(n){ return (counts[n]>1?counts[n]+'x ':'')+n; });
+  // Détails spécifiques
+  var detailLines = [];
+  order.items.forEach(function(i){ if(i.details && detailLines.indexOf(i.details)<0) detailLines.push(i.details); });
+  var noteStr = detailLines.length ? '\n📝 '+detailLines.join(' | ') : '';
+  var msg = '🌴 Break Antillais — Commande N°'+order.orderNumber+'\n\n'
+    +'Bonjour '+order.userPrenom+' !\n'
+    +'Votre commande a bien été enregistrée 🎉\n\n'
+    +'📋 Récapitulatif :\n'
+    +lines.map(function(l){return '• '+l;}).join('\n')
+    +noteStr+'\n\n'
+    +'💰 Total : '+order.total.toFixed(2)+'€ ('+order.payment+')\n'
+    +'⏰ Retrait : '+order.pickupTime+'\n'
+    +'📍 '+(cfg.address||'37 avenue Lenine, 37700 St-Pierre-des-Corps')+'\n\n'
+    +'📱 Suivez votre commande et découvrez notre app :\n'+APP_URL
+    +'\n\nMerci et à tout à l\'heure ! 🫓';
+  var safe = msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  var m = document.getElementById('m-product');
+  m.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
+    +'<div class="modal">'
+    +'<div style="position:sticky;top:-1.4rem;z-index:20;background:var(--dark2);margin:-1.4rem -1.4rem .8rem;padding:.55rem 1rem .45rem;border-bottom:1px solid rgba(255,255,255,.08)">'
+    +'<div style="font-weight:700;font-size:.95rem">✅ Commande N°'+order.orderNumber+' créée</div></div>'
+    +'<p class="text-sm text-muted mb-2">Partagez ce message avec le client.</p>'
+    +'<div style="background:var(--dark3);border-radius:var(--radius-sm);padding:.85rem;font-size:.8rem;line-height:1.7;white-space:pre-wrap;word-break:break-word;margin-bottom:1rem">'+safe+'</div>'
+    +'<button class="btn btn-primary btn-full mb-1" data-msg="'+encodeURIComponent(msg)+'" onclick="shareManualMsg(this)">📤 Partager / WhatsApp</button>'
+    +'<button class="btn btn-secondary btn-full" onclick="closeModal(&apos;m-product&apos;)">Fermer</button>'
+    +'</div></div>';
+  m.style.display='block';
+}
+
+function shareManualMsg(btn) {
+  var msg = decodeURIComponent(btn.dataset.msg);
+  if (navigator.share) { navigator.share({title:'Commande Break Antillais',text:msg}); }
+  else { window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank'); }
+}
+
+
 function adminOrders(){
+  var html_top='<div style="padding:.5rem .9rem .75rem">';
+  html_top+='<button class="btn btn-primary btn-full" onclick="openManualOrder()">📝 Saisir une commande client</button>';
+  html_top+='</div>';
   var orders=getOrders().slice().sort(function(a,b){
     var activeStatus=['pending','confirmed','preparing','ready'];
     var aActive=activeStatus.indexOf(a.status)>=0;
@@ -2884,10 +3090,10 @@ function adminOrders(){
     }
     return new Date(b.createdAt)-new Date(a.createdAt);
   });
-  if(!orders.length) return '<div class="empty-state"><div class="icon">📭</div><div class="title">Aucune commande</div></div>';
+  if(!orders.length) return html_top+'<div class="empty-state"><div class="icon">📭</div><div class="title">Aucune commande</div><p class="text-sm">Saisissez la premiere commande !</p></div>';
   var next={pending:'confirmed',confirmed:'preparing',preparing:'ready',ready:'picked_up'};
   var nextL={confirmed:'✅ Valider',preparing:'👨‍🍳 En prep.',ready:'🎉 Prete',picked_up:'✅ Recuperee'};
-  var html='<div style="padding:0 .9rem">';
+  var html=html_top+'<div style="padding:0 .9rem">';
   orders.forEach(function(o){
     var st=STATUTS[o.status]||STATUTS.pending;
     var nxt=next[o.status];
