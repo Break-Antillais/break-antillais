@@ -2035,7 +2035,7 @@ function pickSlot(btn){
       var next = findNextAvailableSlot(date, itemCount, cfg);
       info.innerHTML = '<span style="color:#f59e0b">⚠️ Ce creneau sera plein avec votre commande ('+(slotData.count+itemCount)+' articles).'+(next?' <button class="btn btn-sm" style="background:rgba(200,35,43,.2);color:var(--red);border:none;cursor:pointer;font-size:.78rem" onclick="autoSelectSlot(&quot;'+next+'&quot;)">→ Prendre '+next+' a la place</button>':'')+'</span>';
     } else {
-      info.textContent = 'Creneau : '+_slot+' ('+remaining+' places restantes)';
+      info.textContent = '';
     }
   }
   checkReady();
@@ -3461,6 +3461,14 @@ function createMarketCode() {
   var btn=document.getElementById('mc-action-btn'); if(btn) btn.textContent='Crediter les points';
   setTimeout(function(){ loadMarketCodesHistory(); }, 600);
 }
+function deleteMarketCode(code) {
+  if (!confirm('Supprimer le code ' + code + ' ?')) return;
+  db.ref('data/market_codes/' + code).remove().then(function(){
+    toast('Code ' + code + ' supprime', 'info');
+    loadMarketCodesHistory();
+  });
+}
+
 function shareMarketCode(btn) {
   var code = btn.dataset.code || '';
   var prenom = btn.dataset.prenom || '';
@@ -3488,7 +3496,10 @@ function loadMarketCodesHistory() {
         +'<div><div class="fw-700" style="font-family:monospace;letter-spacing:.05em">'+c.code+'</div>'
         +'<div class="text-muted" style="font-size:.75rem">'+name+' &bull; '+phone+'</div>'
         +'<div class="text-muted" style="font-size:.7rem">'+c.amount.toFixed(2)+'&euro; &rarr; +'+c.pts+' pts &bull; '+dateStr+'</div></div>'
-        +'<span style="color:'+(c.used?'var(--muted)':'#10b981')+';font-weight:700;font-size:.75rem;white-space:nowrap;padding-left:.5rem">'+(c.used?'Utilise':'Actif')+'</span>'
+        +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:.3rem">'
+        +'<span style="color:'+(c.used?'var(--muted)':'#10b981')+';font-weight:700;font-size:.75rem'>+(c.used?'Utilise':'Actif')+'</span>'
+        +(c.used?'': '<button data-code="'+c.code+'" onclick="deleteMarketCode(this.dataset.code)" style="background:rgba(200,35,43,.15);border:1px solid rgba(200,35,43,.4);color:#ef4444;font-size:.7rem;padding:.2rem .55rem;border-radius:4px;cursor:pointer">Supprimer</button>')
+        +'</div>'
         +'</div></div>';
     });
     hist.innerHTML = h;
