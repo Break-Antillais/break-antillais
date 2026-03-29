@@ -2294,7 +2294,7 @@ function orderCard(o){
   var cur=steps.indexOf(o.status);
   var html='<div class="card mb-2">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.65rem">'
-    +'<span class="font-head fw-800">N°'+o.orderNumber+'</span>'
+    +'<span class="font-head fw-800">Ma commande</span>'
     +'<span class="status-badge" style="background:'+st.color+'22;color:'+st.color+'">'+st.icon+' '+st.label+'</span></div>'
     +'<div class="text-sm text-muted mb-1">'+new Date(o.createdAt).toLocaleDateString('fr-FR',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'})+'</div>'
     +'<div style="margin:.4rem 0">'+(o.items||[]).map(function(it,idx){
@@ -3211,6 +3211,7 @@ function adminOrders(){
       +'<div style="display:flex;gap:.4rem">'
       +(nxt==='preparing' ? '<button class="btn btn-primary btn-sm" style="flex:1" data-oid="'+o.id+'" onclick="advanceOrder(this.dataset.oid)">Démarrer préparation</button>' : isPreparingMode ? '<button class="btn btn-primary btn-sm" style="flex:1" data-oid="'+o.id+'" onclick="advanceOrder(this.dataset.oid)">Toute la commande est prête</button>' : nxt ? '<button class="btn btn-primary btn-sm" style="flex:1" data-oid="'+o.id+'" onclick="advanceOrder(this.dataset.oid)">→ '+nextL[nxt]+'</button>' : '')
       +(canCancel ? '<button class="btn btn-danger btn-sm" style="flex:1" data-oid="'+o.id+'" onclick="cancelOrder(this.dataset.oid)">Annuler</button>' : '')
+      +'</div>'
       +'</div>'
       +'</div>';
   });
