@@ -3278,168 +3278,144 @@ function launchConfetti(duration) {
   setTimeout(function(){ if(container.parentNode) container.parentNode.removeChild(container); }, duration + 2000);
 }
 
-function advanceOrder(id){
-  var next={pending:'confirmed',confirmed:'preparing',preparing:'ready',ready:'picked_up'};
-  // Chercher la commande d'abord en localStorage, sinon dans Firebase
-  var orders=getOrders();
-  var o=orders.find(function(x){return x.id===id;});
-  if(!o){
-    // Commande pas en localStorage — essayer Firebase directement
-    db.ref('data/ba_orders/'+id).once('value').then(function(snap){
-      var fo = snap.val();
-      if (fo) { advanceOrderObj(fo); }
-      else { toast('Commande introuvable','error'); }
-    });
-    return;
-  }
-  advanceOrderObj(o);
-}
-
-function advanceOrderObj(o){
-  var next={pending:'confirmed',confirmed:'preparing',preparing:'ready',ready:'picked_up'};
-  var nxt=next[o.status]; if(!nxt) return;
-  o.status=nxt;
-  o.updatedAt=new Date().toISOString();
-
-  if(nxt==='picked_up'&&!o.pointsAwarded){
-    var users=getUsers();
-    var u=users.find(function(x){return x.id===o.userId;});
-    if(u){
-      var cfg=getCfg();
-      var pts=Math.floor(o.total||0)*(cfg.ptsPerEuro||10);
-      var bonusThreshold=cfg.bonusOrderThreshold||20;
-      var bonusPts=cfg.bonusOrderPts||5;
-      var bonus=(o.total||0)>=bonusThreshold?bonusPts:0;
-      var totalPts=pts+bonus;
-      u.points=(u.points||0)+totalPts;
-      db.ref('data/users/'+u.id+'/points').set(u.points);
-      var hist=load('ba_pts_history_'+u.id,[]);
-      var histLabel='Commande'+(bonus>0?' (+'+bonus+' pts bonus >'+bonusThreshold+'€)':'');
-      hist.unshift({pts:totalPts,label:histLabel,at:new Date().toISOString()});
-      if(hist.length>50) hist=hist.slice(0,50);
-      save('ba_pts_history_'+u.id,hist);
-      saveUser(u);
-      o.pointsAwarded=true;
-      var notifMsg='+'+pts+' points'+(bonus>0?' + '+bonus+' pts bonus':'')+'.';
-      notify(o.userId,'🎁 Points ajoutes !',notifMsg);
-      db.ref('status_updates/'+o.userId+'/palier-check').set({status:'check_palier',at:new Date().toISOString()});
+function advanceOrder(id) {
+  // Chercher dans Firebase directement par ID
+  db.ref('data/ba_orders/' + id).once('value').then(function(snap) {
+    var o = snap.val();
+    if (!o) {
+      // Pas dans Firebase, chercher dans localStorage
+      var local = getOrders().find(function(x) { return x.id === id; });
+      if (!local) { toast('Commande introuvable', 'error'); return; }
+      o = local;
     }
-  }
+    var next = { pending:'confirmed', confirmed:'preparing', preparing:'ready', ready:'picked_up' };
+    var nxt = next[o.status];
+    if (!nxt) { toast('Statut invalide', 'error'); return; }
 
-  // Écrire la commande COMPLÈTE dans Firebase (set, pas update)
-  // Cela garantit qu'elle existe dans Firebase même si elle n'y était pas
-  db.ref('data/ba_orders/'+o.id).set(o).then(function(){
-    // Firebase a confirmé l'écriture — le listener va mettre à jour l'UI automatiquement
-    toast('Statut mis a jour','success');
-  }).catch(function(e){
-    toast('Erreur Firebase: '+e.message,'error');
-  });
+    o.status = nxt;
+    o.updatedAt = new Date().toISOString();
 
-  // Mettre à jour le localStorage immédiatement (ne pas attendre Firebase)
-  saveOrder(o);
-
-  // Recharger l'UI immédiatement
-  var _ac = document.getElementById('admin-content');
-  if (_ac) {
-    var _activeTab = document.querySelector('.admin-tab.active');
-    var _tabText = _activeTab ? _activeTab.textContent || '' : '';
-    if (_tabText.indexOf('Prep') >= 0 || _tabText.indexOf('Récap') >= 0) {
-      _ac.innerHTML = adminPrepa();
-    } else {
-      _ac.innerHTML = adminOrders();
-    }
-  }
-
-  var titles={confirmed:'✅ Confirmee',preparing:'👨‍🍳 En preparation',ready:'🎉 Prete !',picked_up:'✅ Recuperee'};
-  var bodies={
-    confirmed:'Votre commande est confirmee. Retrait a '+o.pickupTime+'.',
-    preparing:'Votre commande est en preparation.',
-    ready:'Votre commande est prete ! Venez la recuperer.',
-    picked_up:'Commande recuperee. Merci ! 🌴'
-  };
-  notifyOrder(o.userId,titles[nxt],bodies[nxt],nxt,o.id,o.orderNumber,o.pickupTime);
-
-  if(nxt==='picked_up'){
-    var delayMs=25*60*1000;
-    setTimeout(function(){
-      db.ref('status_updates/'+o.userId+'/rating-'+o.id).set({
-        status:'rate_order',orderId:o.id,orderNumber:o.orderNumber,
-        title:'Comment etait votre commande ?',
-        body:'Donnez votre avis sur votre derniere commande !',
-        at:new Date().toISOString()
+    // Points si commande récupérée
+    if (nxt === 'picked_up' && !o.pointsAwarded) {
+      db.ref('data/users/' + o.userId).once('value').then(function(usnap) {
+        var u = usnap.val();
+        if (u) {
+          var cfg = getCfg();
+          var pts = Math.floor(o.total || 0) * (cfg.ptsPerEuro || 10);
+          var bonus = (o.total || 0) >= (cfg.bonusOrderThreshold || 20) ? (cfg.bonusOrderPts || 5) : 0;
+          u.points = (u.points || 0) + pts + bonus;
+          db.ref('data/users/' + u.id + '/points').set(u.points);
+          o.pointsAwarded = true;
+          var notifMsg = '+' + (pts + bonus) + ' points' + (bonus > 0 ? ' (dont ' + bonus + ' pts bonus)' : '') + '.';
+          notify(o.userId, '🎁 Points ajoutes !', notifMsg);
+          db.ref('status_updates/' + o.userId + '/palier-check').set({ status: 'check_palier', at: new Date().toISOString() });
+          // Réécrire la commande avec pointsAwarded
+          db.ref('data/ba_orders/' + o.id).set(o);
+        }
       });
-    },delayMs);
-    osSendPush(o.userId,'⭐ Comment etait votre commande ?',
-      'Donnez votre avis sur votre derniere commande - ca nous aide beaucoup !',delayMs);
-  }
-}
-
-function cancelOrder(id){
-  _manualOrderMode = false;
-  // Chercher la commande en localStorage d'abord
-  var o = getOrders().find(function(x){ return x.id===id; });
-  if (!o) {
-    // Pas en localStorage — chercher dans Firebase
-    db.ref('data/ba_orders/'+id).once('value').then(function(snap){
-      var fo = snap.val();
-      if (fo) { _showCancelModal(fo); }
-      else { toast('Commande introuvable', 'error'); }
-    });
-    return;
-  }
-  _showCancelModal(o);
-}
-
-function _showCancelModal(o){
-  var m = document.getElementById('m-product');
-  m.innerHTML='<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
-    +'<div class="modal"><div class="modal-handle"></div>'
-    +'<h2 class="modal-title">Annuler la commande N°'+o.orderNumber+' ?</h2>'
-    +'<p class="text-sm text-muted mb-2">Client : '+o.userPrenom+' — '+fmt(o.total||0)+'</p>'
-    +'<div class="form-group"><label class="form-label">Raison (optionnel)</label>'
-    +'<input class="form-input" id="cancel-reason" placeholder="Ex: client absent, rupture stock..."/></div>'
-    +'<button class="btn btn-danger btn-full mt-2" data-oid="'+o.id+'" onclick="doCancel(this.dataset.oid)">Confirmer annulation</button>'
-    +'<button class="btn btn-secondary btn-full mt-1" onclick="closeModal(&apos;m-product&apos;)">Retour</button>'
-    +'</div></div>';
-  m.style.display='block';
-}
-
-function doCancel(id){
-  var o=getOrders().find(function(x){return x.id===id;});
-  if(!o){
-    // Chercher dans Firebase
-    db.ref('data/ba_orders/'+id).once('value').then(function(snap){
-      var fo=snap.val();
-      if(fo){ _doCancelObj(fo); }
-      else { toast('Commande introuvable','error'); }
-    });
-    return;
-  }
-  _doCancelObj(o);
-}
-
-function _doCancelObj(o){
-  var reason=(document.getElementById('cancel-reason')||{}).value||'';
-  o.status='cancelled';
-  o.cancelReason=reason;
-  o.cancelledAt=new Date().toISOString();
-  saveOrder(o);
-  // Écrire la commande complète dans Firebase
-  db.ref('data/ba_orders/'+o.id).set(o);
-  var msg='Votre commande a ete annulee.'+(reason?' Raison: '+reason:'');
-  notify(o.userId,'❌ Commande annulee',msg);
-  closeModal('m-product');
-  toast('Commande N°'+o.orderNumber+' annulee','info');
-  var _ac2 = document.getElementById('admin-content');
-  if (_ac2) {
-    var _at2 = document.querySelector('.admin-tab.active');
-    var _tt2 = _at2 ? _at2.textContent || '' : '';
-    if (_tt2.indexOf('Prep') >= 0 || _tt2.indexOf('Récap') >= 0) {
-      _ac2.innerHTML = adminPrepa();
-    } else {
-      _ac2.innerHTML = adminOrders();
     }
-  }
+
+    // Sauvegarder dans Firebase par ID
+    db.ref('data/ba_orders/' + o.id).set(o).then(function() {
+      toast('Statut mis a jour ✓', 'success');
+      // Mettre à jour localStorage
+      var orders = getOrders();
+      var idx = orders.findIndex(function(x) { return x.id === o.id; });
+      if (idx >= 0) orders[idx] = o; else orders.push(o);
+      try { localStorage.setItem('_ba_ba_orders', JSON.stringify(orders)); } catch(e) {}
+      // Rafraîchir l'UI
+      var ac = document.getElementById('admin-content');
+      if (ac) ac.innerHTML = adminOrders();
+    }).catch(function(e) {
+      toast('Erreur: ' + e.message, 'error');
+    });
+
+    // Notifications
+    var titles = { confirmed:'✅ Confirmee', preparing:'👨‍🍳 En preparation', ready:'🎉 Prete !', picked_up:'✅ Recuperee' };
+    var bodies = {
+      confirmed: 'Votre commande est confirmee. Retrait a ' + o.pickupTime + '.',
+      preparing: 'Votre commande est en preparation.',
+      ready: 'Votre commande est prete ! Venez la recuperer.',
+      picked_up: 'Commande recuperee. Merci ! 🌴'
+    };
+    notifyOrder(o.userId, titles[nxt], bodies[nxt], nxt, o.id, o.orderNumber, o.pickupTime);
+
+    if (nxt === 'picked_up') {
+      var delayMs = 25 * 60 * 1000;
+      setTimeout(function() {
+        db.ref('status_updates/' + o.userId + '/rating-' + o.id).set({
+          status: 'rate_order', orderId: o.id, orderNumber: o.orderNumber,
+          title: 'Comment etait votre commande ?',
+          body: 'Donnez votre avis sur votre derniere commande !',
+          at: new Date().toISOString()
+        });
+      }, delayMs);
+    }
+  }).catch(function(e) {
+    toast('Erreur Firebase: ' + e.message, 'error');
+  });
+}
+
+function cancelOrder(id) {
+  _manualOrderMode = false;
+  // Chercher dans Firebase directement par ID
+  db.ref('data/ba_orders/' + id).once('value').then(function(snap) {
+    var o = snap.val();
+    if (!o) {
+      var local = getOrders().find(function(x) { return x.id === id; });
+      if (!local) { toast('Commande introuvable', 'error'); return; }
+      o = local;
+    }
+    // Afficher la modale de confirmation
+    var m = document.getElementById('m-product');
+    var cancelHtml = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
+      + '<div class="modal"><div class="modal-handle"></div>'
+      + '<h2 class="modal-title">Annuler la commande N&deg;' + o.orderNumber + ' ?</h2>'
+      + '<p class="text-sm text-muted mb-2">Client : ' + o.userPrenom + ' &mdash; ' + fmt(o.total || 0) + '</p>'
+      + '<div class="form-group"><label class="form-label">Raison (optionnel)</label>'
+      + '<input class="form-input" id="cancel-reason" placeholder="Ex: client absent, rupture stock..."/></div>'
+      + '<button class="btn btn-danger btn-full mt-2" data-cid="' + o.id + '" onclick="confirmCancelOrder(this.dataset.cid)">Confirmer annulation</button>'
+      + '<button class="btn btn-secondary btn-full mt-1" onclick="closeModal(&apos;m-product&apos;)">Retour</button>'
+      + '</div></div>';
+    m.innerHTML = cancelHtml;
+    m.style.display = 'block';
+  }).catch(function(e) {
+    toast('Erreur: ' + e.message, 'error');
+  });
+}
+
+function confirmCancelOrder(id) {
+  var reason = (document.getElementById('cancel-reason') || {}).value || '';
+  // Chercher dans Firebase par ID
+  db.ref('data/ba_orders/' + id).once('value').then(function(snap) {
+    var o = snap.val();
+    if (!o) {
+      var local = getOrders().find(function(x) { return x.id === id; });
+      if (!local) { toast('Commande introuvable', 'error'); return; }
+      o = local;
+    }
+    o.status = 'cancelled';
+    o.cancelReason = reason;
+    o.cancelledAt = new Date().toISOString();
+
+    // Sauvegarder dans Firebase par ID
+    db.ref('data/ba_orders/' + o.id).set(o).then(function() {
+      // Mettre à jour localStorage
+      var orders = getOrders();
+      var idx = orders.findIndex(function(x) { return x.id === o.id; });
+      if (idx >= 0) orders[idx] = o; else orders.push(o);
+      try { localStorage.setItem('_ba_ba_orders', JSON.stringify(orders)); } catch(e) {}
+      notify(o.userId, '❌ Commande annulee', 'Votre commande a ete annulee.' + (reason ? ' Raison: ' + reason : ''));
+      closeModal('m-product');
+      toast('Commande N°' + o.orderNumber + ' annulee', 'info');
+      var ac = document.getElementById('admin-content');
+      if (ac) ac.innerHTML = adminOrders();
+    }).catch(function(e) {
+      toast('Erreur: ' + e.message, 'error');
+    });
+  }).catch(function(e) {
+    toast('Erreur Firebase: ' + e.message, 'error');
+  });
 }
 
 function adminProducts(){
