@@ -1120,6 +1120,178 @@ function updateHeaderAuth() {
 // ══════════════════════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════════════════════
+
+function showForgotPassword() {
+  var m = document.getElementById('m-auth');
+  m.style.display = 'block';
+  m.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-auth&apos;)">'
+    +'<div class="modal"><div class="modal-handle"></div>'
+    +'<h2 class="modal-title">\U0001f511 R\u00e9initialiser</h2>'
+    +'<p class="text-sm text-muted mb-2">Entrez votre email ou num\u00e9ro de t\u00e9l\u00e9phone. Vous recevrez un code \u00e0 6 chiffres pour cr\u00e9er un nouveau mot de passe.</p>'
+    +'<div class="form-group"><label class="form-label">Email ou t\u00e9l\u00e9phone</label>'
+    +'<input class="form-input" id="fp-contact" type="text" placeholder="votre@email.fr ou 06XXXXXXXX" autocomplete="off"/>'
+    +'<span class="form-error" id="fp-err"></span></div>'
+    +'<button class="btn btn-primary btn-full mt-1" onclick="doSendResetCode()">Envoyer le code</button>'
+    +'<div class="divider"></div>'
+    +'<p class="text-center text-sm">'
+    +'<button style="background:none;color:var(--red);border:none;cursor:pointer;font-weight:700" onclick="showLogin()">\u2190 Retour</button></p>'
+    +'</div></div>';
+}
+
+function doSendResetCode() {
+  var contact = (document.getElementById('fp-contact').value||'').trim().toLowerCase();
+  var err = document.getElementById('fp-err');
+  if (!contact) { if(err){err.textContent='Champ requis';err.classList.add('show');} return; }
+
+  var users = getUsers();
+  var user = null;
+
+  user = users.find(function(u){ return (u.email||'').toLowerCase() === contact; });
+  if (!user) {
+    var clean = contact.replace(/[^0-9]/g,'');
+    if (clean.length >= 8) {
+      user = users.find(function(u){
+        var p = (u.phone||'').replace(/[^0-9]/g,'');
+        return p === clean || p.slice(-8) === clean.slice(-8);
+      });
+    }
+  }
+
+  if (!user) {
+    if(err){ err.textContent='Aucun compte trouv\u00e9.'; err.classList.add('show'); }
+    return;
+  }
+
+  // Générer code 6 chiffres
+  var code = String(Math.floor(100000 + Math.random() * 900000));
+  var expiry = Date.now() + 15 * 60 * 1000; // 15 min
+  db.ref('data/reset_tokens/' + user.id).set({ code: code, expiry: expiry, userId: user.id });
+
+  var sent = false;
+
+  // Envoyer par email si disponible
+  if (user.email && typeof emailjs !== 'undefined') {
+    try {
+      emailjs.send(EMAILJS_SERVICE, EMAILJS_TEMPLATE, {
+        email: user.email,
+        client_name: user.prenom,
+        order_number: 'R\u00e9initialisation',
+        items: 'Votre code de r\u00e9initialisation : ' + code + '\n\nCe code expire dans 15 minutes.',
+        total: code,
+        pickup_date: 'Code valable 15 min',
+        pickup_time: '',
+        payment: '',
+        address: 'Break Antillais'
+      });
+      sent = true;
+    } catch(e) {}
+  }
+
+  // Afficher la saisie du code
+  showEnterResetCode(user, sent);
+}
+
+function showEnterResetCode(user, emailSent) {
+  var hint = emailSent
+    ? 'Un code a \u00e9t\u00e9 envoy\u00e9 \u00e0 <strong>' + user.email + '</strong>. V\u00e9rifiez vos spams.'
+    : 'Code g\u00e9n\u00e9r\u00e9. Contactez-nous si vous ne le recevez pas.';
+
+  // Fallback SMS via WhatsApp si pas d'email
+  if (!emailSent && user.phone) {
+    var msg = 'Break Antillais - Code de r\u00e9initialisation\n\nBonjour ' + user.prenom + ' !\nVotre code : ';
+    db.ref('data/reset_tokens/' + user.id).once('value').then(function(snap){
+      var d = snap.val();
+      if (d) {
+        var waMsg = msg + d.code + '\n\nValable 15 minutes.';
+        window.open('https://wa.me/33' + user.phone.replace(/[^0-9]/g,'').replace(/^0/,'') + '?text=' + encodeURIComponent(waMsg), '_blank');
+      }
+    });
+    hint = 'Un SMS WhatsApp a \u00e9t\u00e9 envoy\u00e9 au ' + user.phone + '.';
+  }
+
+  var m = document.getElementById('m-auth');
+  m.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-auth&apos;)">'
+    +'<div class="modal"><div class="modal-handle"></div>'
+    +'<h2 class="modal-title">\U0001f4ec Code re\u00e7u ?</h2>'
+    +'<p class="text-sm text-muted mb-2">' + hint + '</p>'
+    +'<div class="form-group"><label class="form-label">Code \u00e0 6 chiffres</label>'
+    +'<input class="form-input" id="fp-code" type="number" placeholder="123456" maxlength="6" style="font-size:1.4rem;text-align:center;letter-spacing:.2em"/>'
+    +'<span class="form-error" id="fp-err2"></span></div>'
+    +'<button class="btn btn-primary btn-full mt-1" data-uid="' + user.id + '" onclick="doVerifyResetCode(this.dataset.uid)">V\u00e9rifier le code</button>'
+    +'<div class="divider"></div>'
+    +'<button style="background:none;color:var(--muted);border:none;cursor:pointer;font-size:.82rem" onclick="showForgotPassword()">Renvoyer un code</button>'
+    +'&nbsp;&nbsp;'
+    +'<button style="background:none;color:var(--red);border:none;cursor:pointer;font-size:.82rem;font-weight:700" onclick="showLogin()">\u2190 Retour</button>'
+    +'</div></div>';
+  m.style.display='block';
+}
+
+function doVerifyResetCode(userId) {
+  var code = (document.getElementById('fp-code').value||'').trim();
+  var err = document.getElementById('fp-err2');
+  if (!code || code.length !== 6) { if(err){err.textContent='Entrez le code \u00e0 6 chiffres';err.classList.add('show');} return; }
+
+  db.ref('data/reset_tokens/' + userId).once('value').then(function(snap){
+    var d = snap.val();
+    if (!d) { if(err){err.textContent='Code invalide ou expir\u00e9';err.classList.add('show');} return; }
+    if (Date.now() > d.expiry) {
+      db.ref('data/reset_tokens/' + userId).remove();
+      if(err){err.textContent='Code expir\u00e9. Recommencez.';err.classList.add('show');}
+      return;
+    }
+    if (d.code !== code) { if(err){err.textContent='Code incorrect';err.classList.add('show');} return; }
+
+    // Code correct — afficher formulaire nouveau mdp
+    db.ref('data/reset_tokens/' + userId).remove();
+    showNewPasswordForm(userId);
+  });
+}
+
+function showNewPasswordForm(userId) {
+  var m = document.getElementById('m-auth');
+  m.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-auth&apos;)">'
+    +'<div class="modal"><div class="modal-handle"></div>'
+    +'<div style="text-align:center;font-size:2rem;margin-bottom:.4rem">\u2705</div>'
+    +'<h2 class="modal-title text-center">Nouveau mot de passe</h2>'
+    +'<p class="text-sm text-muted mb-2">Choisissez un nouveau mot de passe pour votre compte.</p>'
+    +'<div class="form-group"><label class="form-label">Nouveau mot de passe</label>'
+    +'<input class="form-input" id="fp-newpwd" type="password" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" autocomplete="new-password"/>'
+    +'<span class="form-error" id="fp-err3"></span></div>'
+    +'<div class="form-group"><label class="form-label">Confirmer</label>'
+    +'<input class="form-input" id="fp-newpwd2" type="password" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"/></div>'
+    +'<button class="btn btn-primary btn-full mt-1" data-uid="' + userId + '" onclick="doSaveNewPassword(this.dataset.uid)">Enregistrer</button>'
+    +'</div></div>';
+  m.style.display='block';
+}
+
+function doSaveNewPassword(userId) {
+  var pwd = document.getElementById('fp-newpwd').value;
+  var pwd2 = document.getElementById('fp-newpwd2').value;
+  var err = document.getElementById('fp-err3');
+  if (!pwd || pwd.length < 6) { if(err){err.textContent='Minimum 6 caract\u00e8res';err.classList.add('show');} return; }
+  if (pwd !== pwd2) { if(err){err.textContent='Les mots de passe ne correspondent pas';err.classList.add('show');} return; }
+
+  var users = getUsers();
+  var user = users.find(function(u){ return u.id === userId; });
+  if (!user) { if(err){err.textContent='Compte introuvable';err.classList.add('show');} return; }
+
+  user.pwd = pwd;
+  saveUser(user);
+  db.ref('data/users/' + userId + '/pwd').set(pwd);
+
+  var m = document.getElementById('m-auth');
+  m.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-auth&apos;)">'
+    +'<div class="modal"><div class="modal-handle"></div>'
+    +'<div style="text-align:center;font-size:2.5rem;margin-bottom:.4rem">\U0001f389</div>'
+    +'<h2 class="modal-title text-center">Mot de passe mis \u00e0 jour !</h2>'
+    +'<p class="text-sm text-muted text-center mb-2">Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.</p>'
+    +'<button class="btn btn-primary btn-full" onclick="showLogin()">Se connecter</button>'
+    +'</div></div>';
+  m.style.display='block';
+}
+
+
+
 function showLogin() {
   var m = document.getElementById('m-auth');
   m.style.display = 'block';
@@ -1136,6 +1308,9 @@ function showLogin() {
     +'<input type="checkbox" id="li-remember" style="accent-color:var(--red)"/> Se souvenir de moi</label>'
     +'</div>'
     +'<button class="btn btn-primary btn-full" onclick="doLogin()">Se connecter</button>'
+    +'<div style="text-align:center;margin-top:.6rem">'
+    +'<button style="background:none;color:var(--muted);border:none;cursor:pointer;font-size:.82rem;text-decoration:underline" onclick="showForgotPassword()">Mot de passe ou email oublié ?</button>'
+    +'</div>'
     +'<div class="divider"></div>'
     +'<p class="text-center text-sm text-muted">Pas de compte ? '
     +'<button style="background:none;color:var(--red);border:none;cursor:pointer;font-weight:700" onclick="showRegister()">S&apos;inscrire</button></p>'
