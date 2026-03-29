@@ -888,11 +888,14 @@ function saveUser(user) {
   saveUserToFirebase(user);
 }
 function saveOrder(order) {
+  // Mettre à jour le cache localStorage (tableau)
   var orders = getOrders();
   var idx = orders.findIndex(function(o){ return o.id === order.id; });
   if (idx >= 0) orders[idx] = order; else orders.push(order);
-  save('ba_orders', orders);
-  save('ba_last_save', new Date().toISOString());
+  try { localStorage.setItem('_ba_ba_orders', JSON.stringify(orders)); } catch(e) {}
+  // Écrire dans Firebase par ID (pas en tableau) pour permettre data/ba_orders/<id>
+  db.ref('data/ba_orders/'+order.id).set(order).catch(function(e){ console.warn('FB saveOrder:',e); });
+  try { localStorage.setItem('_ba_ba_last_save', JSON.stringify(new Date().toISOString())); } catch(e) {}
 }
 function saveProduct(p) {
   // Si l'image est en base64 (> 500 chars), la stocker séparément dans Firebase
@@ -2154,12 +2157,10 @@ function confirmOrder(){
     }
   }
   saveOrder(order);
-  db.ref('data/ba_orders/'+order.id).set(order); // sync Firebase
   cart=[]; closeModal('m-product'); updateBadges();
   setTimeout(function(){
     order.status='confirmed';
     saveOrder(order);
-    db.ref('data/ba_orders/'+order.id).update({status:'confirmed'});
     notify(user.id,'✅ Commande confirmee !','Votre commande n°'+num+' est confirmee. Retrait a '+_slot+'.');
   },2000);
   // Send email confirmation
@@ -3071,7 +3072,6 @@ function submitManualOrder() {
     pointsAwarded:false, manualEntry:true
   };
   saveOrder(order);
-  db.ref('data/ba_orders/'+order.id).set(order);
   _manualOrderMode = false;
   _manualCart = [];
   closeModal('m-product');
@@ -3230,7 +3230,16 @@ function markItemDone(orderId, itemIdx) {
     });
   }
   toast('Produit marque pret','success');
-  document.getElementById('admin-content').innerHTML = adminOrders();
+  var _acm = document.getElementById('admin-content');
+  if (_acm) {
+    var _atm = document.querySelector('.admin-tab.active');
+    var _ttm = _atm ? _atm.textContent || '' : '';
+    if (_ttm.indexOf('Prep') >= 0 || _ttm.indexOf('Récap') >= 0) {
+      _acm.innerHTML = adminPrepa();
+    } else {
+      _acm.innerHTML = adminOrders();
+    }
+  }
 }
 
 
@@ -3330,7 +3339,16 @@ function advanceOrderObj(o){
   saveOrder(o);
 
   // Recharger l'UI immédiatement
-  document.getElementById('admin-content').innerHTML=adminOrders();
+  var _ac = document.getElementById('admin-content');
+  if (_ac) {
+    var _activeTab = document.querySelector('.admin-tab.active');
+    var _tabText = _activeTab ? _activeTab.textContent || '' : '';
+    if (_tabText.indexOf('Prep') >= 0 || _tabText.indexOf('Récap') >= 0) {
+      _ac.innerHTML = adminPrepa();
+    } else {
+      _ac.innerHTML = adminOrders();
+    }
+  }
 
   var titles={confirmed:'✅ Confirmee',preparing:'👨‍🍳 En preparation',ready:'🎉 Prete !',picked_up:'✅ Recuperee'};
   var bodies={
@@ -3412,7 +3430,16 @@ function _doCancelObj(o){
   notify(o.userId,'❌ Commande annulee',msg);
   closeModal('m-product');
   toast('Commande N°'+o.orderNumber+' annulee','info');
-  document.getElementById('admin-content').innerHTML=adminOrders();
+  var _ac2 = document.getElementById('admin-content');
+  if (_ac2) {
+    var _at2 = document.querySelector('.admin-tab.active');
+    var _tt2 = _at2 ? _at2.textContent || '' : '';
+    if (_tt2.indexOf('Prep') >= 0 || _tt2.indexOf('Récap') >= 0) {
+      _ac2.innerHTML = adminPrepa();
+    } else {
+      _ac2.innerHTML = adminOrders();
+    }
+  }
 }
 
 function adminProducts(){
