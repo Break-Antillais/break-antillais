@@ -587,8 +587,8 @@ function startFirebaseListeners() {
             showOrderReadyAlert(newO);
           } else if (newO.status === 'confirmed' || newO.status === 'preparing') {
             var msgs = {
-              confirmed: '✅ Commande confirmee !',
-              preparing: '👨‍🍳 Votre commande est en preparation !'
+              confirmed: '✅ Commande n°'+newO.orderNumber+' confirmee !',
+              preparing: '👨‍🍳 Votre commande n°'+newO.orderNumber+' est en preparation !'
             };
             toast(msgs[newO.status]||'Statut mis a jour', 'info', 5000);
             sendPushNotif('Break Antillais', msgs[newO.status]||'Statut mis a jour');
@@ -799,7 +799,6 @@ var DEFAULT_CFG = {
   referralPtsParrain:20, referralPtsFilleul:10, birthdayPts:50,
   bonusOrderThreshold:20, bonusOrderPts:5,
   openDays:[2,3,4,5,6], // 0=dim, 1=lun, 2=mar, 3=mer, 4=jeu, 5=ven, 6=sam
-  disabledSlots:[], // créneaux bloqués: ['19:00','19:30',...]
   maintenance:false, maintenanceMsg:'Nous revenons bientot !',
   closedDates:[], // [{date:'2025-12-25', msg:'Ferme pour Noel'}]
   cgv:'CGV Break Antillais\nCommandes acceptees jusqu a 17h.\nRetrait 19h-22h.',
@@ -856,15 +855,7 @@ function getProducts() {
   // Filter out any deleted that snuck back in
   return saved.filter(function(p){ return deleted.indexOf(p.id) < 0; });
 }
-function getCfg() {
-  var stored = load('ba_cfg', {});
-  var merged = {};
-  Object.keys(DEFAULT_CFG).forEach(function(k){ merged[k] = DEFAULT_CFG[k]; });
-  if (stored && typeof stored === 'object') {
-    Object.keys(stored).forEach(function(k){ merged[k] = stored[k]; });
-  }
-  return merged;
-}
+function getCfg()      { return load('ba_cfg', DEFAULT_CFG); }
 function getCurrentUser() {
   var uid = sessionStorage.getItem('ba_uid');
   if (!uid) uid = localStorage.getItem('ba_uid_persist');
@@ -1967,10 +1958,9 @@ function showCheckout() {
     var slots=getSlots(date,cfg);
     var g='';
     slots.forEach(function(s){
-      var slotLabel = s.disabled ? s.time+' (indispo)' : s.time;
       g+='<button class="slot-btn'+(s.ok?'':' full')+'"'
         +(s.ok?' data-t="'+s.time+'" onclick="pickSlot(this)"':' disabled="disabled"')
-        +'>'+slotLabel+'</button>';
+        +'>'+s.time+'</button>';
     });
     return g;
   }
@@ -2038,7 +2028,6 @@ function showCheckout() {
 
 
 function getSlots(date,cfg) {
-  if (!cfg || !cfg.start || !cfg.end) return [];
   var sp=cfg.start.split(':'),ep=cfg.end.split(':');
   var sh=+sp[0],sm=+sp[1],eh=+ep[0],em=+ep[1];
   var max=cfg.maxSlot||8;
@@ -2051,8 +2040,7 @@ function getSlots(date,cfg) {
     orders.filter(function(o){return o.pickupTime===t;}).forEach(function(o){
       itemCount+=o.items.reduce(function(s,i){return s+1;},0);
     });
-    var disabled = (cfg.disabledSlots||[]).indexOf(t)>=0;
-    slots.push({time:t,count:itemCount,ok:!disabled&&itemCount<max,disabled:disabled});
+    slots.push({time:t,count:itemCount,ok:itemCount<max});
     sm+=30; if(sm>=60){sh++;sm-=60;}
   }
   return slots;
@@ -2202,7 +2190,7 @@ function showOrderConfirm(order,cfg){
     +'<div style="text-align:center;font-size:3rem;margin-bottom:.5rem">🎉</div>'
     +'<h2 class="modal-title text-center">Commande confirmee !</h2>'
     +'<div class="card mb-2" style="background:rgba(16,185,129,.07);border-color:rgba(16,185,129,.25)">'
-    +'<div class="fw-700 mb-1">Commande confirmée !</div>'
+    +'<div class="fw-700 mb-1">Commande n°'+order.orderNumber+'</div>'
     +'<div class="text-sm">'+order.items.map(function(i){return i.name;}).join(', ')+'</div>'
     +'<div class="divider"></div>'
     +'<div style="display:flex;justify-content:space-between"><span class="text-muted text-sm">Retrait</span><span class="fw-700">'+order.pickupTime+'</span></div>'
@@ -2348,19 +2336,6 @@ function renderInfo() {
     +'<div class="text-sm text-muted">'+cfg.address+'</div>'
     +'<a href="https://maps.google.com?q='+encodeURIComponent(cfg.address)+'" target="_blank" class="btn btn-secondary btn-sm mt-2" style="display:inline-flex">📍 Ouvrir dans Maps</a>'
     +'</div>';
-
-  // Section commandes evenements
-  html += '<div class="sec-title">🎉 Commandes événements</div>'
-    +'<div class="card mb-2" style="background:linear-gradient(135deg,rgba(200,35,43,.08),rgba(212,175,55,.06));border-color:rgba(200,35,43,.25)">'
-    +'<div style="font-size:1.4rem;margin-bottom:.5rem">🎂 🥳 🎊</div>'
-    +'<div class="fw-700 mb-1" style="font-size:.95rem">Anniversaires, réunions, événements...</div>'
-    +'<p class="text-sm text-muted mb-2" style="line-height:1.5">Vous organisez un événement et souhaitez commander en grande quantité ? Contactez-nous pour établir un devis personnalisé.</p>'
-    +'<div style="display:flex;gap:.5rem;flex-wrap:wrap">'
-    +'<a href="https://wa.me/33XXXXXXXXX" target="_blank" class="btn btn-primary btn-sm" style="flex:1;display:flex;align-items:center;justify-content:center;gap:.35rem">💬 WhatsApp</a>'
-    +'<a href="mailto:contact@breakantillais.fr?subject=Commande%20%C3%A9v%C3%A9nement" class="btn btn-secondary btn-sm" style="flex:1;display:flex;align-items:center;justify-content:center;gap:.35rem">📧 Email</a>'
-    +'</div>'
-    +'</div>';
-
 
   // CGV Button
   html += '<div class="sec-title">📋 Mentions légales</div>'
@@ -3122,8 +3097,6 @@ function shareManualMsg(btn) {
 function adminOrders(){
   var html_top='<div style="padding:.5rem .9rem .75rem">';
   html_top+='<button class="btn btn-primary btn-full" onclick="openManualOrder()">📝 Saisir une commande client</button>';
-  html_top+='<div style="margin-top:.5rem"><div class="text-sm text-muted" style="margin-bottom:.35rem">⏰ Créneaux ce soir — appuyez pour bloquer/débloquer :</div>';
-  html_top+='<div style="display:flex;flex-wrap:wrap;gap:.35rem">'+buildSlotToggles()+'</div></div>';
   html_top+='</div>';
   var orders=getOrders().slice().sort(function(a,b){
     var activeStatus=['pending','confirmed','preparing','ready'];
@@ -3290,26 +3263,25 @@ function advanceOrder(id){
       db.ref('data/users/'+u.id+'/points').set(u.points);
       // Save points history
       var hist = load('ba_pts_history_'+u.id, []);
-      var histLabel = 'Commande'+(bonus>0?' (+'+bonus+' pts bonus >'+bonusThreshold+'€)':'');
+      var histLabel = 'Commande n°'+o.orderNumber+(bonus>0?' (+'+bonus+' pts bonus >'+bonusThreshold+'€)':'');
       hist.unshift({pts:totalPts, label:histLabel, at:new Date().toISOString()});
       if(hist.length>50) hist=hist.slice(0,50);
       save('ba_pts_history_'+u.id, hist);
       saveUser(u);
       o.pointsAwarded=true;
-      var notifMsg = '+'+pts+' points'+(bonus>0?' + '+bonus+' pts bonus':'')+'.';
+      var notifMsg = '+'+pts+' points'+(bonus>0?' + '+bonus+' pts bonus':'')+' pour votre commande n°'+o.orderNumber;
       notify(o.userId,'🎁 Points ajoutes !', notifMsg);
       // Vérifier palier atteint
       db.ref('status_updates/'+o.userId+'/palier-check').set({status:'check_palier',at:new Date().toISOString()});
     }
   }
   saveOrder(o);
-  db.ref('data/ba_orders/'+o.id).update({status:nxt, pointsAwarded:o.pointsAwarded});
   var titles={confirmed:'✅ Confirmee',preparing:'👨‍🍳 En preparation',ready:'🎉 Prete !',picked_up:'✅ Recuperee'};
   var bodies={
-    confirmed:'Votre commande est confirmee. Retrait a '+o.pickupTime+'.',
-    preparing:'Votre commande est en preparation.',
-    ready:'Votre commande est prete ! Venez la recuperer.',
-    picked_up:'Commande recuperee. Merci ! 🌴'
+    confirmed:'Votre commande n°'+o.orderNumber+' est confirmee. Retrait a '+o.pickupTime+'.',
+    preparing:'Votre commande n°'+o.orderNumber+' est en preparation.',
+    ready:'Votre commande n°'+o.orderNumber+' est prete ! Venez la recuperer.',
+    picked_up:'Commande n°'+o.orderNumber+' recuperee. Merci ! 🌴'
   };
   // Single notification channel - notify() handles Firebase + OneSignal
   notifyOrder(o.userId, titles[nxt], bodies[nxt], nxt, o.id, o.orderNumber, o.pickupTime);
@@ -3323,14 +3295,14 @@ function advanceOrder(id){
       db.ref('status_updates/'+o.userId+'/rating-'+o.id).set({
         status:'rate_order', orderId:o.id, orderNumber:o.orderNumber,
         title:'Comment etait votre commande ?',
-        body:'Donnez votre avis sur votre derniere commande !',
+        body:'Donnez votre avis sur la commande N°'+o.orderNumber,
         at:new Date().toISOString()
       });
     }, delayMs);
     // OneSignal push notification - scheduled 25 min later
     osSendPush(o.userId,
       '⭐ Comment etait votre commande ?',
-      'Donnez votre avis sur votre derniere commande - ca nous aide beaucoup !',
+      'Donnez votre avis sur la commande N°'+o.orderNumber+' - ca nous aide beaucoup !',
       delayMs
     );
   }
@@ -3338,7 +3310,6 @@ function advanceOrder(id){
 function cancelOrder(id){
   var o=getOrders().find(function(x){return x.id===id;});
   if(!o) return;
-  _manualOrderMode = false; // reset avant d'ouvrir la modale d'annulation
   var m = document.getElementById('m-product');
   m.innerHTML='<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
     +'<div class="modal"><div class="modal-handle"></div>'
@@ -3359,8 +3330,7 @@ function doCancel(id){
   o.cancelReason = reason;
   o.cancelledAt = new Date().toISOString();
   saveOrder(o);
-  db.ref('data/ba_orders/'+o.id).update({status:'cancelled', cancelReason:reason, cancelledAt:o.cancelledAt});
-  var msg = 'Votre commande a ete annulee.'+(reason?' Raison: '+reason:'');
+  var msg = 'Votre commande n°'+o.orderNumber+' a ete annulee.'+(reason?' Raison: '+reason:'');
   notify(o.userId,'❌ Commande annulee', msg);
   closeModal('m-product');
   toast('Commande N°'+o.orderNumber+' annulee','info');
@@ -4717,48 +4687,6 @@ function saveOpenDays() {
   toast('Jours d\'ouverture enregistres','success');
 }
 
-
-function buildSlotToggles() {
-  try {
-  var cfg = getCfg();
-  var today = new Date().toISOString().split('T')[0];
-  var slots = getSlots(today, cfg);
-  if (!slots.length) return '<span class="text-muted text-sm">Aucun creneau configure</span>';
-  var disabled = cfg.disabledSlots || [];
-  var h = '';
-  slots.forEach(function(s) {
-    var isOff = disabled.indexOf(s.time) >= 0;
-    var col = isOff ? '#ef4444' : '#10b981';
-    var bg  = isOff ? 'rgba(200,35,43,.2)' : 'rgba(16,185,129,.1)';
-    var lbl = (isOff ? '🔴 ' : '🟢 ') + s.time;
-    h += '<button data-slot="' + s.time + '" onclick="toggleSlot(this.dataset.slot,this)"'
-      + ' style="padding:.35rem .7rem;border-radius:6px;font-size:.82rem;font-weight:700;cursor:pointer;'
-      + 'border:1px solid ' + col + ';background:' + bg + ';color:' + col + '">'
-      + lbl + '</button>';
-  });
-  return h;
-  } catch(e) { return '<span class="text-muted text-sm">Creneaux non disponibles</span>'; }
-}
-function toggleSlot(time, btn) {
-  var cfg = getCfg();
-  var disabled = (cfg.disabledSlots || []).slice();
-  var idx = disabled.indexOf(time);
-  if (idx >= 0) {
-    disabled.splice(idx, 1);
-  } else {
-    disabled.push(time);
-  }
-  cfg.disabledSlots = disabled;
-  save('ba_cfg', cfg);
-  // Mettre à jour le bouton visuellement
-  var isOff = disabled.indexOf(time) >= 0;
-  btn.style.borderColor = isOff ? '#ef4444' : '#10b981';
-  btn.style.background = isOff ? 'rgba(200,35,43,.2)' : 'rgba(16,185,129,.1)';
-  btn.style.color = isOff ? '#ef4444' : '#10b981';
-  btn.textContent = (isOff ? '🔴 ' : '🟢 ') + time;
-  toast(time + (isOff ? ' bloqué' : ' réouvert'), isOff ? 'warning' : 'success', 2000);
-}
-
 function adminConfig(){
   var cfg=getCfg();
   return '<div style="padding:0 .9rem"><div class="sec-title mt-2">Parametres</div>'
@@ -4782,11 +4710,6 @@ function adminConfig(){
     +'<input class="form-input" id="closed-date-input" type="date" style="flex:2"/>'
     +'<input class="form-input" id="closed-date-msg" placeholder="Raison..." style="flex:3"/>'
     +'<button class="btn btn-primary btn-sm" onclick="addClosedDate()" style="flex-shrink:0">+</button></div>'
-    +'<div class="sec-title" style="margin-top:.5rem">⏰ Créneaux du jour</div>'
-    +'<div class="card mb-2" style="padding:.65rem .85rem">'
-    +'<div class="text-sm text-muted mb-2">Appuyez sur un créneau pour le bloquer / débloquer.</div>'
-    +'<div style="display:flex;flex-wrap:wrap;gap:.4rem">'+buildSlotToggles()+'</div>'
-    +'</div>'
     +'<div class="form-group"><label class="form-label">Heure limite</label><input class="form-input" id="cfg-co" type="time" value="'+cfg.cutoff+'"/></div>'
     +'<div class="form-group"><label class="form-label">Debut retrait</label><input class="form-input" id="cfg-st" type="time" value="'+cfg.start+'"/></div>'
     +'<div class="form-group"><label class="form-label">Fin retrait</label><input class="form-input" id="cfg-en" type="time" value="'+cfg.end+'"/></div>'
@@ -5252,7 +5175,7 @@ function showOrderReadyAlert(order) {
   // Browser notification if permitted
   if (window.Notification && Notification.permission === 'granted') {
     new Notification('🎉 Votre commande est prête !', {
-      body: 'Venez recuperer votre commande !',
+      body: 'Commande n°'+order.orderNumber+' — Venez la récupérer !',
       icon: ''
     });
   }
@@ -5263,7 +5186,7 @@ function showOrderReadyAlert(order) {
     +'<div style="font-size:5rem;margin-bottom:1rem;animation:pulse 1s ease-in-out infinite">🎉</div>'
     +'<div style="font-family:var(--head);font-size:2rem;font-weight:800;color:#fff;margin-bottom:.5rem">Votre commande</div>'
     +'<div style="font-family:var(--head);font-size:2rem;font-weight:800;color:var(--red);margin-bottom:.5rem">est prête !</div>'
-    +'<div style="font-size:1rem;color:rgba(255,255,255,.7);margin-bottom:2rem">Votre commande est prête !<br>Venez la récupérer !</div>'
+    +'<div style="font-size:1rem;color:rgba(255,255,255,.7);margin-bottom:2rem">Commande n°'+order.orderNumber+'<br>Venez la récupérer !</div>'
     +'<button class="btn btn-primary" style="font-size:1.1rem;padding:1rem 2.5rem" onclick="this.parentElement.parentElement.remove()">OK, j&apos;arrive ! 🏃</button>'
     +'</div>';
   document.body.appendChild(overlay);
@@ -5637,7 +5560,7 @@ function showRatingModal(orderId, orderNumber) {
     +'<div style="text-align:center;margin-bottom:1rem">'
     +'<div style="font-size:2.5rem">⭐</div>'
     +'<h2 class="modal-title">Votre avis compte !</h2>'
-    +'<p class="text-sm text-muted">Votre avis nous aide à progresser !</p>'
+    +'<p class="text-sm text-muted">Commande N°'+orderNumber+'</p>'
     +'</div>'
     +'<div style="display:flex;justify-content:center;gap:.75rem;margin:1rem 0" id="stars-wrap">';
   for(var i=1;i<=5;i++){
