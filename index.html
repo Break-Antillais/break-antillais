@@ -856,7 +856,15 @@ function getProducts() {
   // Filter out any deleted that snuck back in
   return saved.filter(function(p){ return deleted.indexOf(p.id) < 0; });
 }
-function getCfg()      { return load('ba_cfg', DEFAULT_CFG); }
+function getCfg() {
+  var stored = load('ba_cfg', {});
+  var merged = {};
+  Object.keys(DEFAULT_CFG).forEach(function(k){ merged[k] = DEFAULT_CFG[k]; });
+  if (stored && typeof stored === 'object') {
+    Object.keys(stored).forEach(function(k){ merged[k] = stored[k]; });
+  }
+  return merged;
+}
 function getCurrentUser() {
   var uid = sessionStorage.getItem('ba_uid');
   if (!uid) uid = localStorage.getItem('ba_uid_persist');
@@ -2030,6 +2038,7 @@ function showCheckout() {
 
 
 function getSlots(date,cfg) {
+  if (!cfg || !cfg.start || !cfg.end) return [];
   var sp=cfg.start.split(':'),ep=cfg.end.split(':');
   var sh=+sp[0],sm=+sp[1],eh=+ep[0],em=+ep[1];
   var max=cfg.maxSlot||8;
@@ -4710,6 +4719,7 @@ function saveOpenDays() {
 
 
 function buildSlotToggles() {
+  try {
   var cfg = getCfg();
   var today = new Date().toISOString().split('T')[0];
   var slots = getSlots(today, cfg);
@@ -4727,8 +4737,8 @@ function buildSlotToggles() {
       + lbl + '</button>';
   });
   return h;
+  } catch(e) { return '<span class="text-muted text-sm">Creneaux non disponibles</span>'; }
 }
-
 function toggleSlot(time, btn) {
   var cfg = getCfg();
   var disabled = (cfg.disabledSlots || []).slice();
