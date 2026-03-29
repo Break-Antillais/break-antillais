@@ -37,6 +37,10 @@
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { background: var(--dark) !important; color: var(--text); font-family: var(--body); min-height: 100vh; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
+/* PWA safe area — évite que le header passe sous la barre de statut iOS */
+@supports (padding-top: env(safe-area-inset-top)) {
+  body { padding-top: env(safe-area-inset-top); }
+}
 /* ── Fond d'ecran global (sauf écran chargement) ── */
 #app-bg { display: none; }
 #app-overlay { display: none; }
@@ -96,6 +100,7 @@ body > *:not(#loading):not(#app-bg):not(nav) { position:relative; z-index:1; }
 .header {
   background: var(--dark2); border-bottom: 1px solid var(--border);
   padding: .7rem 1.1rem; display: flex; align-items: center; justify-content: space-between;
+  padding-top: max(.7rem, env(safe-area-inset-top));
   position: sticky; top: 0; z-index: 100; backdrop-filter: blur(10px);
 }
 .logo { display: flex; align-items: center; gap: 0; line-height: 1; }
