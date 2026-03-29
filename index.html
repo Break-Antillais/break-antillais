@@ -3294,6 +3294,7 @@ function advanceOrder(id){
     }
   }
   saveOrder(o);
+  db.ref('data/ba_orders/'+o.id).update({status:nxt, pointsAwarded:o.pointsAwarded});
   var titles={confirmed:'✅ Confirmee',preparing:'👨‍🍳 En preparation',ready:'🎉 Prete !',picked_up:'✅ Recuperee'};
   var bodies={
     confirmed:'Votre commande est confirmee. Retrait a '+o.pickupTime+'.',
