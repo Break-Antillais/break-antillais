@@ -1289,7 +1289,7 @@ function renderHome() {
       var nd = new Date(); nd.setDate(nd.getDate()+d);
       if (openDays.indexOf(nd.getDay())>=0) { nextWorkDay=nd; break; }
     }
-    html += '<p style="font-size:.78rem;color:#f59e0b;margin-top:.35rem;font-weight:600">📅 Ferme le '+dayNames[todayDay]+' — ouverture '+(nextWorkDay?dayNames[nextWorkDay.getDay()]+' '+nextWorkDay.toLocaleDateString('fr-FR',{day:'numeric',month:'long'}):'prochainement')+'</p>';
+    html += '<p style="font-size:.78rem;color:#f59e0b;margin-top:.35rem;font-weight:600;text-align:center">📅 Ferme le '+dayNames[todayDay]+' — ouverture '+(nextWorkDay?dayNames[nextWorkDay.getDay()]+' '+nextWorkDay.toLocaleDateString('fr-FR',{day:'numeric',month:'long'}):'prochainement')+'</p>';
   } else if (todayClosed) {
     html += '<p style="font-size:.78rem;color:#f59e0b;margin-top:.35rem;font-weight:600">📅 Fermeture exceptionnelle — '+todayClosed.msg+'</p>';
   }
@@ -2817,13 +2817,13 @@ function adminPrepa() {
 
   var CAT_ORDER = ['bokit','agoulou','crepe_salee','crepe_sucree','mini_bokit','enfant','boisson'];
   var CAT_LABELS = {
-    bokit:       '\U0001f953 Bokits',
-    agoulou:     '\U0001f32f Agoulous',
-    crepe_salee: '\U0001f95e Cr\u00e8pes Sal\u00e9es',
-    crepe_sucree:'\U0001f36b Cr\u00e8pes Sucr\u00e9es',
-    mini_bokit:  '\U0001f4e6 Mini Bokits',
-    enfant:      '\U0001f9d2 Menus Enfants',
-    boisson:     '\U0001f964 Boissons'
+    bokit:       '🥩 Bokits',
+    agoulou:     '🌯 Agoulous',
+    crepe_salee: '🥞 Crèpes Salées',
+    crepe_sucree:'🍫 Crèpes Sucrées',
+    mini_bokit:  '📦 Mini Bokits',
+    enfant:      '🧒 Menus Enfants',
+    boisson:     '🥤 Boissons'
   };
 
   var bycat = {};
@@ -2836,7 +2836,7 @@ function adminPrepa() {
   var totalItems = Object.values(counts).reduce(function(s,p){return s+p.qty;},0);
 
   var html = '<div style="padding:.75rem">';
-  html += '<div class="sec-title">\U0001f374 R\u00e9cap Pr\u00e9paration \u2014 Commandes actives</div>';
+  html += '<div class="sec-title">🍴 Récap Préparation \u2014 Commandes actives</div>';
 
   // Bandeau résumé
   html += '<div style="display:flex;gap:.5rem;margin-bottom:1rem">';
@@ -2849,7 +2849,7 @@ function adminPrepa() {
   html += '</div>';
 
   if (!orders.length) {
-    html += '<div class="empty-state" style="padding:2rem 0"><div class="icon">\U0001f4ed</div>';
+    html += '<div class="empty-state" style="padding:2rem 0"><div class="icon">📭</div>';
     html += '<div class="title">Aucune commande active</div></div>';
     html += '</div>';
     return html;
@@ -2862,7 +2862,7 @@ function adminPrepa() {
   orderedCats.concat(otherCats).forEach(function(cat) {
     var items    = bycat[cat].slice().sort(function(a,b){return b.qty-a.qty;});
     var catTotal = items.reduce(function(s,p){return s+p.qty;},0);
-    var label    = CAT_LABELS[cat] || ('\U0001f4cc '+cat);
+    var label    = CAT_LABELS[cat] || ('📌 '+cat);
 
     html += '<div class="sec-title" style="margin-top:1rem">' + label;
     html += ' <span style="color:var(--muted);font-weight:500;font-size:.78rem">(' + catTotal + ')</span></div>';
@@ -2899,7 +2899,7 @@ function adminPrepa() {
     html += '</div>';
   });
 
-  html += '<button class="btn btn-secondary btn-full mt-2" onclick="document.getElementById(\'admin-content\').innerHTML=adminPrepa()" style="font-size:.8rem">\U0001f504 Actualiser</button>';
+  html += '<button class="btn btn-secondary btn-full mt-2" onclick="document.getElementById(\'admin-content\').innerHTML=adminPrepa()" style="font-size:.8rem">🔄 Actualiser</button>';
   html += '</div>';
   return html;
 }
