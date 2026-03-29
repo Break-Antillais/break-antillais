@@ -2154,10 +2154,12 @@ function confirmOrder(){
     }
   }
   saveOrder(order);
+  db.ref('data/ba_orders/'+order.id).set(order); // sync Firebase
   cart=[]; closeModal('m-product'); updateBadges();
   setTimeout(function(){
     order.status='confirmed';
     saveOrder(order);
+    db.ref('data/ba_orders/'+order.id).update({status:'confirmed'});
     notify(user.id,'✅ Commande confirmee !','Votre commande n°'+num+' est confirmee. Retrait a '+_slot+'.');
   },2000);
   // Send email confirmation
