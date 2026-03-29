@@ -3199,24 +3199,20 @@ function adminOrders(){
       +'<div style="font-size:.72rem;color:var(--muted);margin-bottom:.5rem">'+new Date(o.createdAt).toLocaleString('fr-FR')+'</div>'
       +'<div style="background:var(--dark4);border-radius:8px;padding:.6rem .75rem;margin-bottom:.5rem;font-size:.82rem;line-height:1.6">'
       +itemsHtml+'</div>'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-top:1px solid var(--border)">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center">'
+      +'<div style="padding:.35rem 0;border-top:1px solid var(--border)">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.2rem">'
       +'<span class="text-gold fw-800" style="font-size:1.05rem">'+fmt(o.total||0)+'</span>'
       +'<span class="text-sm text-muted">'+o.payment+'</span>'
       +'</div>'
-      +'<div style="margin-top:.25rem;display:flex;align-items:center;gap:.5rem">'
-      +'<span style="font-family:var(--head);font-size:1.0rem;font-weight:800;color:var(--gold)">⏰ '+o.pickupTime+'</span>'
+      +'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">'
+      +'<span style="font-family:var(--head);font-size:.95rem;font-weight:800;color:var(--gold)">⏰ '+o.pickupTime+'</span>'
       +'<span class="text-sm text-muted">'+o.pickupDate+'</span>'
+      +'</div>'
+      +'<div style="display:flex;gap:.4rem">'
+      +(nxt==='preparing' ? '<button class="btn btn-primary btn-sm" style="flex:1" data-oid="'+o.id+'" onclick="advanceOrder(this.dataset.oid)">Démarrer préparation</button>' : isPreparingMode ? '<button class="btn btn-primary btn-sm" style="flex:1" data-oid="'+o.id+'" onclick="advanceOrder(this.dataset.oid)">Toute la commande est prête</button>' : nxt ? '<button class="btn btn-primary btn-sm" style="flex:1" data-oid="'+o.id+'" onclick="advanceOrder(this.dataset.oid)">→ '+nextL[nxt]+'</button>' : '')
+      +(canCancel ? '<button class="btn btn-danger btn-sm" style="flex:1" data-oid="'+o.id+'" onclick="cancelOrder(this.dataset.oid)">Annuler</button>' : '')
+      +'</div>'
       +'</div>';
-    if(nxt==='preparing') {
-      html+='<button class="btn btn-primary btn-sm btn-full mt-1" data-oid="'+o.id+'" onclick="advanceOrder(this.dataset.oid)">D&eacute;marrer pr&eacute;paration</button>';
-    } else if(isPreparingMode) {
-      html+='<button class="btn btn-primary btn-sm btn-full mt-1" data-oid="'+o.id+'" onclick="advanceOrder(this.dataset.oid)">Toute la commande est pr&ecirc;te</button>';
-    } else if(nxt) {
-      html+='<button class="btn btn-primary btn-sm btn-full mt-1" data-oid="'+o.id+'" onclick="advanceOrder(this.dataset.oid)">&rarr; '+nextL[nxt]+'</button>';
-    }
-    if(canCancel) html+='<button class="btn btn-danger btn-sm btn-full mt-1" data-oid="'+o.id+'" onclick="cancelOrder(this.dataset.oid)">Annuler la commande</button>';
-    html+='</div>';
   });
   // Avis clients
   var ratings = load('ba_ratings',[]);
