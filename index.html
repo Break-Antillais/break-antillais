@@ -830,9 +830,9 @@ var DEFAULT_PRODUCTS = [
   {id:'d4',cat:'boisson',name:'Colorado Peche Menthe',price:2.00,desc:'33cl',ok:true,stock:null,stockAlert:3},
   {id:'d5',cat:'boisson',name:'Royal Soda Kampagne',price:2.00,desc:'33cl',ok:true,stock:null,stockAlert:3},
   {id:'d6',cat:'boisson',name:'Royal Soda Grenadine',price:2.00,desc:'33cl',ok:true,stock:null,stockAlert:3},
-  {id:'a1',cat:'agoulou',name:'Agoulou 2 Viandes',price:9.00,desc:'Prochainement',ok:false,soon:true},
-  {id:'a2',cat:'agoulou',name:'Agoulou 3 Viandes',price:10.00,desc:'Prochainement',ok:false,soon:true},
-  {id:'a3',cat:'agoulou',name:'Agoulou 4 Viandes',price:11.00,desc:'Prochainement',ok:false,soon:true},
+  {id:'a1',cat:'agoulou',name:'Agoulou 2 Viandes',price:9.00,desc:'Prochainement',ok:false,soon:false,stock:null,stockAlert:3},
+  {id:'a2',cat:'agoulou',name:'Agoulou 3 Viandes',price:10.00,desc:'Prochainement',ok:false,soon:false,stock:null,stockAlert:3},
+  {id:'a3',cat:'agoulou',name:'Agoulou 4 Viandes',price:11.00,desc:'Prochainement',ok:false,soon:false,stock:null,stockAlert:3},
   {id:'mb1',cat:'mini_bokit',name:'Box 10 Mini Bokit',price:17.00,desc:'Max 2 saveurs differentes - 5 mini bokit par saveur',ok:true,boxType:'box10',maxSaveurs:2,qty:10},
   {id:'mb2',cat:'mini_bokit',name:'Box 20 Mini Bokit',price:32.00,desc:'Max 5 saveurs differentes - repartition libre',ok:true,boxType:'box20',maxSaveurs:5,qty:20},
   {id:'mb3',cat:'mini_bokit',name:'Box 30 Mini Bokit',price:45.00,desc:'Max 5 saveurs differentes - repartition libre',ok:true,boxType:'box30',maxSaveurs:5,qty:30},
@@ -1632,10 +1632,12 @@ function pcardHTML(p) {
   var priceHtml = p.isClassique
     ? '<div class="pcard-price" style="font-size:.8rem;color:var(--muted)">Prix selon selection</div>'
     : '<div class="pcard-price">'+fmt(p.price||0)+'</div>';
+  var epuise = !p.ok && !p.soon && p.stock === 0;
   var clickAttr = clickable ? ' data-pid="'+p.id+'" onclick="openProduct(this.dataset.pid)"' : '';
   return '<div class="'+cls+'"'+clickAttr+'>'
     + imgHtml
     + (p.soon ? '<span class="soon-badge">Bientot</span>' : '')
+    + (epuise ? '<span class="soon-badge" style="background:#6b7280">Épuisé</span>' : '')
     + favBtn
     + '<div class="pcard-body">'
     + '<div class="pcard-name">'+p.name+'</div>'
@@ -2384,6 +2386,23 @@ function confirmOrder(){
   }
   saveOrder(order);
   db.ref('data/ba_orders/'+order.id).set(order);
+  // Déduire le stock des produits commandés
+  (function(){
+    var prods = getProducts();
+    var changed = false;
+    order.items.forEach(function(item){
+      var p = prods.find(function(x){ return x.id===item.id; });
+      if (!p || p.stock === null || p.stock === undefined) return;
+      var qty = item.qty || 1;
+      p.stock = Math.max(0, p.stock - qty);
+      if (p.stock === 0) { p.ok = false; }
+      saveProduct(p);
+      db.ref('data/ba_products/'+p.id+'/stock').set(p.stock);
+      if (p.stock === 0) db.ref('data/ba_products/'+p.id+'/ok').set(false);
+      changed = true;
+    });
+    if (changed) renderHome();
+  })();
   cart=[]; closeModal('m-product'); updateBadges();
   setTimeout(function(){
     order.status='confirmed';
@@ -3020,7 +3039,21 @@ function adminDashboard(){
     }, 1000);
   }, 100);
 
-  return html;
+    // Alerte stock faible
+  var lowStock = getProducts().filter(function(p){
+    return p.stock !== null && p.stock !== undefined && p.stock <= (p.stockAlert||3);
+  });
+  if (lowStock.length) {
+    html += '<div class="sec-title" style="color:#f59e0b">⚠️ Stock faible</div>';
+    lowStock.forEach(function(p){
+      var col = p.stock===0?'#ef4444':'#f59e0b';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem .75rem;background:var(--dark3);border-radius:8px;margin-bottom:.3rem">';
+      html += '<span class="text-sm fw-700">'+p.name+'</span>';
+      html += '<span style="font-weight:800;color:'+col+';font-size:.9rem">'+(p.stock===0?'ÉPUISÉ':p.stock+' restant(s)')+'</span>';
+      html += '</div>';
+    });
+  }
+return html;
 }
 
 function exportWhatsApp() {
