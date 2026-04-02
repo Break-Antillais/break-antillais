@@ -1370,6 +1370,9 @@ function doLogin() {
   var user = users.find(function(u){ return u.email===email && u.pwd===pwd; });
   if (!user) { if(err){err.textContent='Email ou mot de passe incorrect';err.classList.add('show');} return; }
   var remember = document.getElementById('li-remember') && document.getElementById('li-remember').checked;
+  user.lastLogin = new Date().toISOString();
+  saveUser(user);
+  db.ref('data/users/'+user.id+'/lastLogin').set(user.lastLogin);
   setCurrentUser(user, remember);
   closeModal('m-auth');
   updateHeaderAuth(); updateBadges();
@@ -2899,6 +2902,7 @@ function renderAdmin(role){
   if(isSup && !isPrep) tabs+='<button class="admin-tab" onclick="adminTab(&apos;products&apos;,this)">🍽 Produits</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;prepa&apos;,this)">🍽 Prepa</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;stats&apos;,this)">📊 Stats</button>'
+    +'<button class="admin-tab" onclick="adminTab(&apos;clients&apos;,this)">👥 Clients</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;loyalty&apos;,this)">🎁 Fidelite</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;config&apos;,this)">⚙️ Config</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;invoices&apos;,this)">🧾 Factures</button>'
@@ -2917,7 +2921,7 @@ function renderAdmin(role){
 function adminTab(tab, btn){
   document.querySelectorAll('.admin-tab').forEach(function(b){b.classList.remove('active');});
   btn.classList.add('active');
-  var fns={dashboard:adminDashboard,orders:adminOrders,prepa:adminPrepa,products:adminProducts,stats:adminStats,loyalty:adminLoyalty,config:adminConfig,invoices:adminInvoices,marketcodes:adminMarketCodes,promocodes:adminPromoCodes};
+  var fns={dashboard:adminDashboard,orders:adminOrders,prepa:adminPrepa,products:adminProducts,stats:adminStats,loyalty:adminLoyalty,clients:adminClients,config:adminConfig,invoices:adminInvoices,marketcodes:adminMarketCodes,promocodes:adminPromoCodes};
   if(fns[tab]) document.getElementById('admin-content').innerHTML=fns[tab]();
 }
 
@@ -4505,6 +4509,131 @@ function redeemPromoCode(code) {
       renderProfile();
     });
   }).catch(function(){ toast('Erreur verification','error'); });
+}
+
+function adminClients(sort) {
+  sort = sort || 'inscription';
+  var allClients = getUsers().filter(function(u) {
+    var r = u.role || 'client';
+    return r === 'client' || r === '';
+  });
+  if (sort === 'points') {
+    allClients.sort(function(a,b){ return (b.points||0)-(a.points||0); });
+  } else if (sort === 'connexion') {
+    allClients.sort(function(a,b){
+      var da = a.lastLogin || a.createdAt || '0';
+      var db2 = b.lastLogin || b.createdAt || '0';
+      return da > db2 ? -1 : da < db2 ? 1 : 0;
+    });
+  } else {
+    allClients.sort(function(a,b){
+      var da = a.createdAt || '0';
+      var db2 = b.createdAt || '0';
+      return da > db2 ? -1 : da < db2 ? 1 : 0;
+    });
+  }
+  var now = Date.now();
+  var totalPts = allClients.reduce(function(s,u){ return s+(u.points||0); }, 0);
+  var actifs30 = allClients.filter(function(u){
+    var d = new Date(u.lastLogin || u.createdAt || 0);
+    return (now - d.getTime()) < 30*86400000;
+  }).length;
+  var html = '<div style="padding:0 .9rem 5rem">';
+  html += '<div class="stat-grid" style="margin:.75rem 0">'
+    + '<div class="stat-card"><div class="stat-val">'+allClients.length+'</div><div class="stat-lbl">Clients</div></div>'
+    + '<div class="stat-card"><div class="stat-val">'+actifs30+'</div><div class="stat-lbl">Actifs 30j</div></div>'
+    + '<div class="stat-card"><div class="stat-val">'+totalPts+'</div><div class="stat-lbl">Pts total</div></div>'
+    + '</div>';
+  html += '<div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.6rem">'
+    + '<span class="text-sm text-muted" style="align-self:center">Trier :</span>'
+    + '<button class="btn btn-sm '+(sort==='inscription'?'btn-primary':'btn-secondary')+'" onclick="document.getElementById(\'admin-content\').innerHTML=adminClients(\'inscription\')">Inscription</button>'
+    + '<button class="btn btn-sm '+(sort==='points'?'btn-primary':'btn-secondary')+'" onclick="document.getElementById(\'admin-content\').innerHTML=adminClients(\'points\')">Points</button>'
+    + '<button class="btn btn-sm '+(sort==='connexion'?'btn-primary':'btn-secondary')+'" onclick="document.getElementById(\'admin-content\').innerHTML=adminClients(\'connexion\')">Connexion</button>'
+    + '</div>';
+  html += '<div class="form-group" style="margin-bottom:.5rem">'
+    + '<input class="form-input" id="client-search2" placeholder="Rechercher un client..." oninput="filterClients2(this.value)" style="background:var(--dark3)"/>'
+    + '</div>';
+  html += '<div id="clients-list2">';
+  if (!allClients.length) {
+    html += '<p class="text-sm text-muted">Aucun client inscrit</p>';
+  } else {
+    allClients.forEach(function(u, i) {
+      var p = getPalier(u.points||0);
+      var lastSeen = u.lastLogin || u.createdAt;
+      var inscritStr = u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : '\u2014';
+      var daysInactive = lastSeen ? Math.floor((now - new Date(lastSeen).getTime()) / 86400000) : null;
+      var inactiveColor = daysInactive === null ? 'var(--muted)' : daysInactive > 30 ? '#ef4444' : daysInactive > 14 ? '#f59e0b' : '#10b981';
+      var lastSeenLabel = daysInactive === 0 ? "Auj." : daysInactive === 1 ? 'Hier' : daysInactive !== null ? 'Il y a '+daysInactive+'j' : '\u2014';
+      var orders = getOrders().filter(function(o){ return o.userId===u.id && o.status!=='cancelled'; });
+      html += '<div style="background:var(--dark3);border-radius:10px;padding:.6rem .8rem;margin-bottom:.4rem">'
+        + '<div style="display:flex;align-items:center;gap:.6rem">'
+        + '<div style="font-weight:800;color:var(--red);min-width:22px;font-size:.82rem">#'+(i+1)+'</div>'
+        + '<div class="avatar" style="width:34px;height:34px;font-size:.85rem;flex-shrink:0">'+u.prenom[0].toUpperCase()+'</div>'
+        + '<div style="flex:1;min-width:0">'
+        + '<div style="display:flex;align-items:center;gap:.35rem;flex-wrap:wrap">'
+        + '<span class="fw-700 text-sm">'+u.prenom+'</span>'
+        + '<span style="font-size:.7rem;background:rgba(255,255,255,.07);padding:.1rem .35rem;border-radius:100px;color:'+p.color+'">'+p.icon+' '+p.name+'</span>'
+        + '</div>'
+        + '<div style="font-size:.67rem;color:var(--muted)">'+u.email+'</div>'
+        + '<div style="font-size:.67rem;color:var(--muted)">'+(u.phone||'\u2014')+'</div>'
+        + '</div>'
+        + '<div style="text-align:right;flex-shrink:0">'
+        + '<div class="fw-700 text-gold" style="font-size:.88rem">'+(u.points||0)+' pts</div>'
+        + '<div style="font-size:.64rem;color:var(--muted)">'+orders.length+' cmd</div>'
+        + '</div>'
+        + '</div>'
+        + '<div style="display:flex;gap:.75rem;margin-top:.3rem;flex-wrap:wrap">'
+        + '<div style="font-size:.64rem;color:var(--muted)">Inscrit <span style="color:var(--text)">'+inscritStr+'</span></div>'
+        + '<div style="font-size:.64rem;color:var(--muted)">Vu <span style="color:'+inactiveColor+'">'+lastSeenLabel+'</span></div>'
+        + '</div>'
+        + '<div style="display:flex;gap:.35rem;margin-top:.4rem">'
+        + '<button class="btn btn-secondary btn-sm" style="flex:1;font-size:.7rem" data-uid="'+u.id+'" onclick="adjPts(this.dataset.uid)">\u270f\ufe0f Points</button>'
+        + '<button class="btn btn-secondary btn-sm" style="flex:1;font-size:.7rem" data-uid="'+u.id+'" onclick="viewClientOrders(this.dataset.uid)">\U0001f4e6 Commandes</button>'
+        + '</div>'
+        + '</div>';
+    });
+  }
+  html += '</div></div>';
+  return html;
+}
+
+function filterClients2(q) {
+  q = (q||'').toLowerCase();
+  var rows = document.getElementById('clients-list2');
+  if (!rows) return;
+  Array.from(rows.children).forEach(function(el) {
+    el.style.display = (!q || el.textContent.toLowerCase().indexOf(q) >= 0) ? '' : 'none';
+  });
+}
+
+function viewClientOrders(uid) {
+  var orders = getOrders().filter(function(o){ return o.userId===uid; })
+    .sort(function(a,b){ return new Date(b.createdAt)-new Date(a.createdAt); });
+  var user = getUsers().find(function(u){ return u.id===uid; });
+  var m = document.getElementById('m-product');
+  var statuts = {pending:'En attente',confirmed:'Confirm\u00e9e',preparing:'En pr\u00e9p.',ready:'Pr\u00eate',picked_up:'R\u00e9cup\u00e9r\u00e9e',cancelled:'Annul\u00e9e'};
+  var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
+    + '<div class="modal"><div class="modal-handle"></div>'
+    + '<h2 class="modal-title">' + (user?user.prenom:'Client') + '</h2>';
+  if (!orders.length) {
+    html += '<p class="text-sm text-muted">Aucune commande</p>';
+  } else {
+    orders.slice(0,20).forEach(function(o){
+      var col = o.status==='cancelled'?'#ef4444':o.status==='picked_up'?'#10b981':'#f59e0b';
+      html += '<div style="background:var(--dark3);border-radius:8px;padding:.5rem .75rem;margin-bottom:.35rem">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center">'
+        + '<span class="fw-700 text-sm">N\u00b0'+o.orderNumber+'</span>'
+        + '<span style="font-size:.7rem;color:'+col+'">'+(statuts[o.status]||o.status)+'</span>'
+        + '</div>'
+        + '<div style="font-size:.7rem;color:var(--muted)">'+new Date(o.createdAt).toLocaleDateString('fr-FR')+' \u00b7 '+o.pickupTime+' \u00b7 '+fmt(o.total||0)+'</div>'
+        + '<div style="font-size:.7rem;color:var(--muted)">'+(o.items||[]).map(function(i){return i.name;}).join(', ')+'</div>'
+        + '</div>';
+    });
+  }
+  html += '<button class="btn btn-secondary btn-full mt-2" onclick="closeModal(&apos;m-product&apos;)">Fermer</button>'
+    + '</div></div>';
+  m.innerHTML = html;
+  m.style.display = 'block';
 }
 
 function adminLoyalty(){
