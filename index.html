@@ -173,32 +173,23 @@ body > *:not(#loading):not(#app-bg):not(nav) { position:relative; z-index:1; }
 
 /* ── MODAL ── */
 .modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,.82);
-  z-index: 500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: max(env(safe-area-inset-top),.5rem) .75rem calc(env(safe-area-inset-bottom) + 80px);
-  box-sizing: border-box;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 500;
+  display: flex; align-items: center; justify-content: center;
+  padding: .5rem;
+  padding-top: max(.5rem, env(safe-area-inset-top));
+  padding-bottom: calc(.5rem + env(safe-area-inset-bottom) + 72px);
   animation: fadeIn .2s ease;
 }
 .modal {
   background: var(--dark2); border: 1px solid var(--border);
   border-radius: var(--radius);
   width: 100%; max-width: 520px;
-  max-height: min(88vh, calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 90px));
+  max-height: min(88dvh, calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 90px));
+  max-height: min(88vh, calc(100vh - 90px));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  touch-action: pan-y;
-  padding: 1.4rem;
-  animation: slideUp .28s ease;
-  box-sizing: border-box;
-  position: relative;
-  flex-shrink: 0;
+  padding: 1.4rem; animation: slideUp .28s ease;
 }
 .modal-handle { width: 36px; height: 3px; background: var(--border); border-radius: 2px; margin: 0 auto 1.1rem; }
 .modal-title { font-family: var(--head); font-size: 1.25rem; font-weight: 800; margin-bottom: 1.1rem; }
@@ -217,7 +208,7 @@ body > *:not(#loading):not(#app-bg):not(nav) { position:relative; z-index:1; }
 
 
 /* ── CHIPS ── */
-.chips { display: flex; flex-wrap: wrap; gap: .35rem; width: 100%; }
+.chips { display: flex; flex-wrap: wrap; gap: .35rem; }
 .chip {
   padding: .38rem .8rem; border: 1.5px solid var(--border);
   border-radius: 100px; font-size: .78rem; font-weight: 600;
@@ -1797,7 +1788,7 @@ function continueOpenProduct(id) {
 
   var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
     +'<div class="modal"><div class="modal-handle"></div>'
-    +'<div style="position:sticky;top:0;z-index:20;background:var(--dark2);margin:-1.4rem -1.4rem .8rem;padding:.45rem 1rem .4rem;border-bottom:1px solid rgba(255,255,255,.08);">'
+    +'<div style="position:sticky;top:-1.4rem;z-index:20;background:var(--dark2);margin:-1.4rem -1.4rem .8rem;padding:.45rem 1rem .4rem;border-bottom:1px solid rgba(255,255,255,.08);">'
     +'<button onclick="closeModal(&apos;m-product&apos;)" style="background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .75rem;border-radius:100px;font-weight:600;white-space:nowrap">← Retour</button>'
     +'</div>'
     +modalVisualHtml
@@ -5813,7 +5804,7 @@ function showRewardConfig(productName, palierName, prod) {
   var m = document.getElementById('m-product');
   var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
     +'<div class="modal"><div class="modal-handle"></div>'
-    +'<div style="position:sticky;top:0;z-index:20;background:var(--dark2);margin:-1.4rem -1.4rem .8rem;padding:.45rem 1rem .4rem;border-bottom:1px solid rgba(255,255,255,.08);">'
+    +'<div style="position:sticky;top:-1.4rem;z-index:20;background:var(--dark2);margin:-1.4rem -1.4rem .8rem;padding:.45rem 1rem .4rem;border-bottom:1px solid rgba(255,255,255,.08);">'
     +'<button onclick="closeModal(&apos;m-product&apos;)" style="background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .75rem;border-radius:100px;font-weight:600;white-space:nowrap">← Retour</button>'
     +'</div>'
     +'<div style="text-align:center;font-size:2.5rem;margin-bottom:.4rem">'+(EMOJI[prod?prod.cat:'bokit']||'🍽')+'</div>'
