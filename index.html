@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -862,7 +861,7 @@ var pendingProd = null;
 var pendingExtras = {meats:[], sauces:[], crudites:[], supplements:[]};
 var _manualCart = [];
 var _manualOrderMode = false;
-var _manualOrderData = {prenom:'', phone:'', slot:'', payment:'Especes'};
+var _manualOrderData = {prenom:'', phone:'', email:'', slot:'', payment:'Especes', linkedUserId:null};
 var _slot = null;
 var _payment = null;
 var _boxQtys = {};
@@ -3271,7 +3270,7 @@ function adminPrepa() {
 function openManualOrder() {
   _manualCart = [];
   _manualOrderMode = true;
-  _manualOrderData = {prenom:'', phone:'', slot:'', payment:'Especes'};
+  _manualOrderData = {prenom:'', phone:'', email:'', slot:'', payment:'Especes', linkedUserId:null};
   renderManualOrderModal();
 }
 
@@ -3334,16 +3333,24 @@ function renderManualOrderModal() {
     +'<button onclick="_manualOrderMode=false;closeModal(&apos;m-product&apos;)" style="background:rgba(255,255,255,.08);border:none;color:var(--text);font-size:.85rem;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.35rem .75rem;border-radius:100px;font-weight:600;white-space:nowrap">← Retour</button>'
     +'</div>'
     +'<h2 class="modal-title">📝 Commande client</h2>'
+    +'<div class="form-group">'
+    +'<label class="form-label">🔍 Rechercher un client existant</label>'
+    +'<input class="form-input" id="mo-client-search" placeholder="Nom ou téléphone..." oninput="moSearchClient(this.value)" style="background:var(--dark3)"/>'
+    +'<div id="mo-client-results" style="margin-top:.3rem"></div>'
+    +'<div id="mo-client-selected" style="display:none;margin-top:.35rem;padding:.4rem .75rem;background:rgba(16,185,129,.1);border:1px solid #10b981;border-radius:8px;font-size:.82rem"></div>'
+    +'</div>'
     +'<div class="form-group"><label class="form-label">Prénom client *</label>'
     +'<input class="form-input" id="mo-prenom" placeholder="Ex: Michel" value="'+_manualOrderData.prenom+'" oninput="_manualOrderData.prenom=this.value"/></div>'
-    +'<div class="form-group"><label class="form-label">Téléphone (pour SMS)</label>'
+    +'<div class="form-group"><label class="form-label">Téléphone</label>'
     +'<input class="form-input" id="mo-phone" type="tel" placeholder="Ex: 0612345678" value="'+_manualOrderData.phone+'" oninput="_manualOrderData.phone=this.value"/></div>'
+    +'<div class="form-group"><label class="form-label">Email (pour le récap)</label>'
+    +'<input class="form-input" id="mo-email" type="email" placeholder="client@email.com" value="'+(_manualOrderData.email||'')+'" oninput="_manualOrderData.email=this.value"/></div>'
     +'<div class="form-group"><label class="form-label">Heure de retrait *</label>'
     +'<select class="form-select" id="mo-slot" onchange="_manualOrderData.slot=this.value">'+slotsHtml+'</select></div>'
     +'<div class="form-group"><label class="form-label">Règlement</label>'
     +'<div style="display:flex;gap:.5rem">'
-    +'<button class="btn btn-secondary" id="mo-pay-esp" onclick="moSetPay(\'Especes\')" style="flex:1;'+(( _manualOrderData.payment==='Especes')?'background:var(--red)':'')+'" >💵 Espèces</button>'
-    +'<button class="btn btn-secondary" id="mo-pay-card" onclick="moSetPay(\'Carte\')" style="flex:1;'+((_manualOrderData.payment==='Carte')?'background:var(--red)':'')+'" >💳 Carte</button>'
+    +'<button class="btn btn-secondary" id="mo-pay-esp" onclick="moSetPay(\'Especes\')" style="flex:1;'+( _manualOrderData.payment==='Especes'?'background:var(--red)':'')+'">💵 Espèces</button>'
+    +'<button class="btn btn-secondary" id="mo-pay-card" onclick="moSetPay(\'Carte\')" style="flex:1;'+(_manualOrderData.payment==='Carte'?'background:var(--red)':'')+'">💳 Carte</button>'
     +'</div></div>'
     + cartHtml
     +'<div class="form-group"><label class="form-label">Ajouter des produits</label>'
@@ -3361,6 +3368,7 @@ function moSetPay(val) {
 function moAddSimple(pid, pname, pprice, pcat) {
   _manualOrderData.prenom = (document.getElementById('mo-prenom')||{}).value || _manualOrderData.prenom;
   _manualOrderData.phone  = (document.getElementById('mo-phone')||{}).value  || _manualOrderData.phone;
+  _manualOrderData.email  = (document.getElementById('mo-email')||{}).value  || _manualOrderData.email || '';
   _manualOrderData.slot   = (document.getElementById('mo-slot')||{}).value   || _manualOrderData.slot;
   _manualCart.push({id:genId(), pid:pid, name:pname, price:pprice, cat:pcat, details:'', qty:1});
   toast(pname+' ajouté','success',1500);
@@ -3376,14 +3384,76 @@ function moRemoveItem(name) {
 function moConfigProduct(pid) {
   _manualOrderData.prenom = (document.getElementById('mo-prenom')||{}).value || _manualOrderData.prenom;
   _manualOrderData.phone  = (document.getElementById('mo-phone')||{}).value  || _manualOrderData.phone;
+  _manualOrderData.email  = (document.getElementById('mo-email')||{}).value  || _manualOrderData.email || '';
   _manualOrderData.slot   = (document.getElementById('mo-slot')||{}).value   || _manualOrderData.slot;
   // Ouvrir la modale de config produit — addToCart() détectera _manualOrderMode
   continueOpenProduct(pid);
 }
 
+// Recherche client dans la modale manuelle
+function moSearchClient(q) {
+  var res = document.getElementById('mo-client-results');
+  if (!res) return;
+  q = (q||'').trim().toLowerCase();
+  if (q.length < 2) { res.innerHTML = ''; return; }
+  var users = getUsers().filter(function(u){ return !u.role || u.role==='client'; });
+  var found = users.filter(function(u){
+    return (u.prenom||'').toLowerCase().indexOf(q)>=0
+      || (u.phone||'').replace(/\s/g,'').indexOf(q.replace(/\s/g,''))>=0
+      || (u.email||'').toLowerCase().indexOf(q)>=0;
+  }).slice(0,5);
+  if (!found.length) { res.innerHTML = '<div class="text-sm text-muted" style="padding:.3rem 0">Aucun client trouvé</div>'; return; }
+  var h = '';
+  found.forEach(function(u){
+    h += '<div data-uid="'+u.id+'" onclick="moSelectClient(\''+u.id+'\')" style="display:flex;justify-content:space-between;align-items:center;padding:.4rem .65rem;background:var(--dark3);border-radius:6px;margin-bottom:.2rem;cursor:pointer;border:1px solid var(--border)">'
+      + '<span class="fw-700 text-sm">'+u.prenom+'</span>'
+      + '<span class="text-sm text-muted">'+( u.phone||u.email||'')+'</span>'
+      + '</div>';
+  });
+  res.innerHTML = h;
+}
+
+function moSelectClient(uid) {
+  var u = getUsers().find(function(x){ return x.id===uid; });
+  if (!u) return;
+  // Stocker l'ID du client lié
+  _manualOrderData.linkedUserId = u.id;
+  _manualOrderData.prenom = u.prenom;
+  _manualOrderData.phone  = u.phone  || _manualOrderData.phone;
+  _manualOrderData.email  = u.email  || '';
+  // Mettre à jour les champs
+  var pEl = document.getElementById('mo-prenom');
+  var phEl = document.getElementById('mo-phone');
+  var emEl = document.getElementById('mo-email');
+  if (pEl)  pEl.value  = u.prenom;
+  if (phEl) phEl.value = u.phone || '';
+  if (emEl) emEl.value = u.email || '';
+  // Afficher la sélection
+  var selEl = document.getElementById('mo-client-selected');
+  if (selEl) {
+    selEl.style.display = 'block';
+    selEl.innerHTML = '✅ <strong>'+u.prenom+'</strong>'
+      + (u.phone ? ' · '+u.phone : '')
+      + (u.email ? ' · '+u.email : '')
+      + ' <button onclick="moUnselectClient()" style="margin-left:.5rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:.8rem">✕</button>';
+  }
+  // Vider la recherche
+  var srEl = document.getElementById('mo-client-search');
+  var resEl = document.getElementById('mo-client-results');
+  if (srEl) srEl.value = '';
+  if (resEl) resEl.innerHTML = '';
+}
+
+function moUnselectClient() {
+  _manualOrderData.linkedUserId = null;
+  var selEl = document.getElementById('mo-client-selected');
+  if (selEl) selEl.style.display = 'none';
+}
+
 function submitManualOrder() {
   _manualOrderData.prenom = (document.getElementById('mo-prenom')||{}).value || _manualOrderData.prenom;
   _manualOrderData.phone  = (document.getElementById('mo-phone')||{}).value  || _manualOrderData.phone;
+  _manualOrderData.email  = (document.getElementById('mo-email')||{}).value  || _manualOrderData.email || '';
   _manualOrderData.slot   = (document.getElementById('mo-slot')||{}).value   || _manualOrderData.slot;
   var prenom = _manualOrderData.prenom.trim();
   var phone  = _manualOrderData.phone.trim();
@@ -3396,9 +3466,11 @@ function submitManualOrder() {
   var num    = String(orders.length+1).padStart(4,'0');
   var today  = new Date().toISOString().split('T')[0];
   var total  = _manualCart.reduce(function(s,i){return s+i.price;},0);
+  var linkedId = _manualOrderData.linkedUserId || ('guest-'+genId());
+  var email = ((document.getElementById('mo-email')||{}).value || _manualOrderData.email || '').trim();
   var order  = {
     id:genId(), orderNumber:num,
-    userId:'guest-'+genId(), userPrenom:prenom, userPhone:phone,
+    userId:linkedId, userPrenom:prenom, userPhone:phone,
     items:_manualCart.slice(), total:total, originalTotal:total,
     pickupDate:today, pickupTime:slot,
     payment:_manualOrderData.payment||'Especes',
@@ -3406,7 +3478,23 @@ function submitManualOrder() {
     pointsAwarded:false, manualEntry:true
   };
   saveOrder(order);
+  // Envoyer email si disponible
+  if (email) {
+    var emailUser = {prenom: prenom, email: email};
+    sendOrderEmail(order, emailUser, cfg);
+  }
+  // Notifier le client sur son compte s'il est lié
+  if (_manualOrderData.linkedUserId) {
+    notify(_manualOrderData.linkedUserId, '✅ Commande confirmée !', 'Votre commande N°'+num+' est enregistrée. Retrait à '+slot+'.');
+    db.ref('status_updates/'+_manualOrderData.linkedUserId+'/manual-'+order.id).set({
+      status:'confirmed', orderId:order.id, orderNumber:num,
+      title:'✅ Commande confirmée !',
+      body:'Votre commande N°'+num+' est enregistrée. Retrait à '+slot+'.',
+      at:new Date().toISOString()
+    });
+  }
   _manualOrderMode = false;
+  _manualOrderData.linkedUserId = null;
   _manualCart = [];
   closeModal('m-product');
   toast('Commande confirmée ! 🌴','success',3000);
