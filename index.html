@@ -686,7 +686,8 @@ function startFirebaseListeners() {
     if (v === null) return;
     var arr = Array.isArray(v) ? v : Object.values(v).filter(function(x){ return x && x.id; });
     try { localStorage.setItem('_ba_ba_products', JSON.stringify(arr)); } catch(e) {}
-    // Rafraîchir l'affichage produits si nécessaire
+    // Rafraîchir l'affichage produits
+    if (typeof renderHome === 'function' && document.getElementById('home-body')) renderHome();
     if (currentScreen === 'home') renderHome();
   });
 
@@ -921,9 +922,18 @@ function getCfg() {
 }
 function getCurrentUser() {
   var uid = sessionStorage.getItem('ba_uid');
-  if (!uid) uid = localStorage.getItem('ba_uid_persist');
+  if (!uid) {
+    // Vérifier si la session persistante est encore valide
+    var expiry = parseInt(localStorage.getItem('ba_uid_expiry')||'0');
+    if (expiry && new Date().getTime() < expiry) {
+      uid = localStorage.getItem('ba_uid_persist');
+    } else if (expiry) {
+      // Session expirée → déconnexion propre
+      localStorage.removeItem('ba_uid_persist');
+      localStorage.removeItem('ba_uid_expiry');
+    }
+  }
   if (!uid) return null;
-  // Return fresh user from storage
   var user = getUsers().find(function(u){ return u.id === uid; }) || null;
   if (user && !sessionStorage.getItem('ba_uid')) sessionStorage.setItem('ba_uid', user.id);
   return user;
@@ -931,10 +941,14 @@ function getCurrentUser() {
 function setCurrentUser(user, remember) {
   if (user) {
     sessionStorage.setItem('ba_uid', user.id);
-    if (remember) localStorage.setItem('ba_uid_persist', user.id);
+    // Toujours persister avec expiration 21 jours (indépendant de la case remember)
+    var expiry = new Date().getTime() + 21 * 24 * 60 * 60 * 1000;
+    localStorage.setItem('ba_uid_persist', user.id);
+    localStorage.setItem('ba_uid_expiry', String(expiry));
   } else {
     sessionStorage.removeItem('ba_uid');
     localStorage.removeItem('ba_uid_persist');
+    localStorage.removeItem('ba_uid_expiry');
   }
 }
 function saveUser(user) {
@@ -952,17 +966,24 @@ function saveOrder(order) {
   try { localStorage.setItem('_ba_ba_last_save', JSON.stringify(new Date().toISOString())); } catch(e) {}
 }
 function saveProduct(p) {
-  // Si l'image est en base64 (> 500 chars), la stocker séparément dans Firebase
-  // pour ne pas saturer localStorage
   var pToSave = Object.assign({}, p);
+  // Si stock = 0, forcer ok = false
+  if (pToSave.stock !== null && pToSave.stock !== undefined && pToSave.stock === 0) {
+    pToSave.ok = false;
+  }
   if (p.image && p.image.length > 500 && p.image.indexOf('data:') === 0) {
-    // Stocker l'image dans Firebase séparément
     db.ref('data/product_images/' + p.id).set(p.image)
       .catch(function(e){ console.warn('Image save error:', e); });
-    // Dans le produit, garder juste une référence
     pToSave.image = '__firebase__' + p.id;
     pToSave._imageRef = p.id;
   }
+  // Sync Firebase complet
+  var fbData = Object.assign({}, pToSave);
+  delete fbData.image; // image séparée
+  db.ref('data/ba_products/' + pToSave.id).update({
+    stock: pToSave.stock !== undefined ? pToSave.stock : null,
+    ok: pToSave.ok
+  }).catch(function(e){ console.warn('FB saveProduct:', e); });
   var saved = load('ba_products', null);
   if (!saved) saved = DEFAULT_PRODUCTS.slice();
   if (!Array.isArray(saved)) saved = Object.values(saved).filter(function(p){ return p && p.id; });
@@ -1452,6 +1473,33 @@ function doRegister() {
       toast('Code de parrainage valide ! +'+filleulBonus+' points bonus !', 'success', 5000);
     }).catch(function(e){ console.warn('Referral error:', e); });
   }
+  // Rattacher les commandes guest avec le même numéro de téléphone
+  (function(){
+    var cleanPhone = phone.replace(/[^0-9]/g, '');
+    db.ref('data/ba_orders').once('value').then(function(snap){
+      var v = snap.val();
+      if (!v) return;
+      var orders = Array.isArray(v) ? v : Object.values(v);
+      orders.forEach(function(o){
+        if (!o || !o.id) return;
+        // Commande guest avec même téléphone
+        if (o.userId && o.userId.indexOf('guest-') === 0) {
+          var orderPhone = (o.userPhone||'').replace(/[^0-9]/g, '');
+          if (orderPhone && orderPhone === cleanPhone) {
+            // Rattacher au nouveau compte
+            db.ref('data/ba_orders/'+o.id+'/userId').set(newUser.id);
+            // Aussi mettre à jour localStorage
+            try {
+              var lsOrders = JSON.parse(localStorage.getItem('_ba_ba_orders')||'[]');
+              var arr = Array.isArray(lsOrders) ? lsOrders : Object.values(lsOrders);
+              var i = arr.findIndex(function(x){ return x && x.id === o.id; });
+              if (i >= 0) { arr[i].userId = newUser.id; localStorage.setItem('_ba_ba_orders', JSON.stringify(arr)); }
+            } catch(e) {}
+          }
+        }
+      });
+    }).catch(function(e){ console.warn('Rattachement commandes:', e); });
+  })();
   setCurrentUser(newUser);
   closeModal('m-auth');
   updateHeaderAuth(); updateBadges(); renderHome();
@@ -1619,7 +1667,9 @@ function filterCat(cat, btn) {
   setTimeout(loadProductImages, 200);
 }
 function pcardHTML(p) {
-  var clickable = p.ok && !p.soon;
+  // Stock épuisé = non cliquable
+  var stockEmpty = (p.stock !== null && p.stock !== undefined && p.stock === 0);
+  var clickable = p.ok && !p.soon && !stockEmpty;
   var cls = 'pcard' + (clickable ? '' : ' unavail');
   var _imgSrc = p.image && p.image.indexOf('__firebase__') === 0 ? null : p.image;
   var _imgId = 'pimg-' + p.id;
@@ -1640,7 +1690,7 @@ function pcardHTML(p) {
   var priceHtml = p.isClassique
     ? '<div class="pcard-price" style="font-size:.8rem;color:var(--muted)">Prix selon selection</div>'
     : '<div class="pcard-price">'+fmt(p.price||0)+'</div>';
-  var epuise = !p.ok && !p.soon && p.stock === 0;
+  var epuise = stockEmpty || (!p.ok && !p.soon && p.stock === 0);
   var clickAttr = clickable ? ' data-pid="'+p.id+'" onclick="openProduct(this.dataset.pid)"' : '';
   return '<div class="'+cls+'"'+clickAttr+'>'
     + imgHtml
@@ -2442,7 +2492,7 @@ function confirmOrder(){
     order.status='confirmed';
     saveOrder(order);
     db.ref('data/ba_orders/'+order.id).set(order).catch(function(e){ console.warn('FB confirmOrder:',e); });
-    notify(user.id,'✅ Commande confirmee !','Votre commande n°'+num+' est confirmee. Retrait a '+_slot+'.');
+    notify(user.id,'✅ Commande confirmee !','Votre commande est confirmee. Retrait a '+_slot+'.');
   },2000);
   // Send email confirmation
   sendOrderEmail(order, user, cfg);
@@ -2562,7 +2612,11 @@ function orderCard(o){
     +'<div style="margin:.4rem 0">'+(o.items||[]).map(function(it,idx){
       var s = o.itemsStatus && o.itemsStatus[idx];
       var dot = s==='done'?'<span style="color:#10b981">✓</span>':o.status==='picked_up'?'<span style="color:#6b7280">✓</span>':o.status==='preparing'&&idx===0&&!s?'<span style="color:#3b82f6">~</span>':'<span style="color:#6b7280">○</span>';
-      return '<div style="font-size:.82rem;padding:.15rem 0">'+dot+' '+it.name+'</div>';
+      var detailHtml = '';
+      if (it.details) {
+        it.details.split('|').forEach(function(d){ d=d.trim(); if(d) detailHtml += '<div style="font-size:.72rem;color:var(--muted);padding-left:.9rem">→ '+d+'</div>'; });
+      }
+      return '<div style="padding:.15rem 0"><div style="font-size:.82rem">'+dot+' '+it.name+'</div>'+detailHtml+'</div>';
     }).join('')+'</div>'
     +'<div class="text-sm fw-700 text-gold">'+fmt(o.total||0)+' · '+o.payment+'</div>'
     +'<div class="text-sm mt-1">⏰ Retrait a '+o.pickupTime+'</div>';
@@ -2582,8 +2636,8 @@ function orderCard(o){
     var bonus=o.total>=(cfg2.bonusOrderThreshold||20)?(cfg2.bonusOrderPts||5):0;
     html+='<div class="text-sm mt-1" style="color:#2d9e5f">+'+( earnedPts+bonus)+' pts gagnés'+( bonus>0?' (dont +'+bonus+' bonus)':'')+'</div>';
   }
-  if(o.status==='picked_up'){
-    html+='<button class="btn btn-secondary btn-sm btn-full mt-2" data-oid="'+o.id+'" onclick="reorder(this.dataset.oid)">🔄 Recommander la meme chose</button>';
+  if(o.status==='picked_up'||o.status==='cancelled'){
+    html+='<button class="btn btn-secondary btn-sm btn-full mt-2" data-oid="'+o.id+'" onclick="reorder(this.dataset.oid)">🔄 Recommander la même chose</button>';
   }
   html+='</div>';
   return html;
@@ -3485,11 +3539,11 @@ function submitManualOrder() {
   }
   // Notifier le client sur son compte s'il est lié
   if (_manualOrderData.linkedUserId) {
-    notify(_manualOrderData.linkedUserId, '✅ Commande confirmée !', 'Votre commande N°'+num+' est enregistrée. Retrait à '+slot+'.');
+    notify(_manualOrderData.linkedUserId, '✅ Commande confirmée !', 'Votre commande est enregistrée. Retrait à '+slot+'.');
     db.ref('status_updates/'+_manualOrderData.linkedUserId+'/manual-'+order.id).set({
       status:'confirmed', orderId:order.id, orderNumber:num,
       title:'✅ Commande confirmée !',
-      body:'Votre commande N°'+num+' est enregistrée. Retrait à '+slot+'.',
+      body:'Votre commande est enregistrée. Retrait à '+slot+'.',
       at:new Date().toISOString()
     });
   }
@@ -3768,9 +3822,25 @@ function advanceOrder(id) {
         if (u && u.id) {
           findAndAwardPoints(u);
         } else {
-          // Fallback: chercher dans ba_users
+          // Fallback 1: chercher dans localStorage
           var local = getUsers().find(function(x){ return x.id === o.userId; });
-          if (local) findAndAwardPoints(local);
+          if (local) {
+            findAndAwardPoints(local);
+          } else {
+            // Fallback 2: chercher dans data/ba_users Firebase
+            db.ref('data/ba_users').once('value').then(function(buSnap){
+              var buVal = buSnap.val() || [];
+              var buArr = Array.isArray(buVal) ? buVal : Object.values(buVal);
+              var buUser = buArr.find(function(x){ return x && x.id === o.userId; });
+              if (buUser) {
+                // Migrer vers data/users/ pour les prochaines fois
+                db.ref('data/users/'+buUser.id).set(buUser);
+                findAndAwardPoints(buUser);
+              } else {
+                console.warn('[Points] User introuvable pour commande', o.id, 'userId:', o.userId);
+              }
+            });
+          }
         }
       });
     }
@@ -4874,19 +4944,6 @@ function adminLoyalty(){
     +'<button class="btn btn-primary btn-sm" onclick="savePaliers()" style="flex:1">💾 Enregistrer les paliers</button>'
     +'</div>';
 
-  // Classement
-  html+='<div class="sec-title">Classement clients</div>';
-  html += '<div class="form-group" style="margin-bottom:.75rem">'
-    +'<input class="form-input" id="client-search" placeholder="🔍 Rechercher un client..." oninput="filterClients(this.value)" style="background:var(--dark3)"/></div>';
-  html += '<div id="clients-list">';
-  if(!clients.length){
-    html+='<p class="text-sm text-muted">Aucun client inscrit</p>';
-  } else {
-    clients.slice(0,50).forEach(function(u,i){
-      html+=clientRow(u, i+1);
-    });
-  }
-  html += '</div>';
   // Avis clients
   var ratings = load('ba_ratings',[]);
   // Also check Firebase
@@ -6011,32 +6068,57 @@ function checkBirthdayOffer(user) {
   if (!user || !user.bday) return;
   var today = new Date();
   var bday = new Date(user.bday);
-  if (bday.getDate() === today.getDate() && bday.getMonth() === today.getMonth()) {
-    // Check if already sent this year
-    var lastBday = load('ba_bday_'+user.id, null);
-    if (lastBday === today.getFullYear()) return;
-    save('ba_bday_'+user.id, today.getFullYear());
-    // Create birthday promo
-    var expiry = new Date(); expiry.setDate(expiry.getDate() + 30);
+  if (bday.getDate() !== today.getDate() || bday.getMonth() !== today.getMonth()) return;
+  // Vérifier si déjà offert cette année (Firebase)
+  var thisYear = today.getFullYear();
+  db.ref('data/ba_bday_'+user.id).once('value').then(function(snap) {
+    if (snap.val() === thisYear) return; // déjà fait
+    // Marquer comme fait
+    db.ref('data/ba_bday_'+user.id).set(thisYear);
+    save('ba_bday_'+user.id, thisYear);
     var cfg = getCfg();
     var bdayPts = cfg.birthdayPts || 50;
-    var promos = load('ba_promos', []);
-    promos.push({
-      id: genId(), userId: user.id, type: 'birthday',
-      title: 'Joyeux anniversaire '+user.prenom+' ! 🎂',
-      desc: 'Offre speciale anniversaire — '+bdayPts+' points bonus offerts !',
-      expiresAt: expiry.toISOString(), used: false
-    });
-    save('ba_promos', promos);
+    // Ajouter les points
     user.points = (user.points||0) + bdayPts;
-    var hist = load('ba_pts_history_'+user.id, []);
-    hist.unshift({pts:bdayPts, label:'Cadeau anniversaire 🎂', at:new Date().toISOString()});
-    save('ba_pts_history_'+user.id, hist);
+    db.ref('data/users/'+user.id+'/points').set(user.points);
     saveUser(user);
+    setCurrentUser(user);
+    // Historique points Firebase
+    var histEntry = {pts: bdayPts, label: 'Cadeau anniversaire 🎂', at: new Date().toISOString()};
+    db.ref('data/ba_pts_history_'+user.id).once('value').then(function(hs) {
+      var arr = hs.val() || [];
+      if (!Array.isArray(arr)) arr = Object.values(arr);
+      arr.unshift(histEntry);
+      db.ref('data/ba_pts_history_'+user.id).set(arr.slice(0, 50));
+    });
+    // Notification in-app
+    notify(user.id, '🎂 Joyeux anniversaire '+user.prenom+' !', '+'+bdayPts+' points offerts pour votre anniversaire !');
+    // Email
+    try {
+      if (user.email && typeof emailjs !== 'undefined') {
+        emailjs.send('service_uez8gro', 'template_gs8itxh', {
+          email: user.email,
+          client_name: user.prenom,
+          order_number: 'ANNIV-'+thisYear,
+          items: 'Cadeau anniversaire Break Antillais 🎂',
+          total: '+'+bdayPts+' points offerts',
+          pickup_date: today.toLocaleDateString('fr-FR'),
+          pickup_time: '',
+          payment: 'Cadeau',
+          address: getCfg().address || ''
+        }).catch(function(e){ console.warn('Bday email:', e); });
+      }
+    } catch(e) {}
+    // SMS WhatsApp
+    var smsMsg = '🎂 Joyeux anniversaire '+user.prenom+' ! Break Antillais vous offre +'+bdayPts+' points fidélité aujourd\'hui. Bonne journée !';
+    if (user.phone) {
+      db.ref('data/ba_bday_sms_'+user.id).set({msg: smsMsg, phone: user.phone, at: new Date().toISOString()});
+    }
     setTimeout(function(){
-      toast('🎂 Joyeux anniversaire '+user.prenom+' ! +50 points offerts !', 'success', 6000);
-    }, 2000);
-  }
+      toast('🎂 Joyeux anniversaire '+user.prenom+' ! +'+bdayPts+' points offerts !', 'success', 6000);
+      updateBadges();
+    }, 1000);
+  }).catch(function(e){ console.warn('Birthday check:', e); });
 }
 
 // SHOW REFERRAL CODE IN PROFILE
