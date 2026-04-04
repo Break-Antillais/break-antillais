@@ -574,6 +574,21 @@ function loadFromFirebase(cb) {
           val = Object.values(val).filter(function(v){ return v && typeof v === 'object'; });
         }
       }
+      // Pour ba_orders : fusionner avec localStorage au lieu d'écraser
+      if (k === 'ba_orders' && Array.isArray(val)) {
+        try {
+          var existing = JSON.parse(localStorage.getItem('_ba_ba_orders')||'[]');
+          if (!Array.isArray(existing)) existing = [];
+          var merged = existing.slice();
+          val.forEach(function(o){
+            if (!o || !o.id) return;
+            var i = merged.findIndex(function(x){ return x && x.id === o.id; });
+            if (i >= 0) merged[i] = o; else merged.push(o);
+          });
+          localStorage.setItem('_ba_ba_orders', JSON.stringify(merged));
+        } catch(e) { try { localStorage.setItem('_ba_'+k, JSON.stringify(val)); } catch(e2) {} }
+        return;
+      }
       try { localStorage.setItem('_ba_'+k, JSON.stringify(val)); } catch(e) {}
     });
     // Merge users: from ba_users array (old format) + users object (new format)
@@ -604,8 +619,10 @@ function startFirebaseListeners() {
   // Real-time orders sync - with status change detection
   db.ref('data/ba_orders').on('value', function(snap){
     var v = snap.val();
-    if (v === null) return;
-    var newOrders = Array.isArray(v) ? v : Object.values(v);
+    if (v === null || v === undefined) return;
+    // Protéger contre un objet vide qui écraserait les commandes
+    if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) return;
+    var newOrders = Array.isArray(v) ? v : Object.values(v).filter(function(x){ return x && x.id; });
     var oldOrdersStr = localStorage.getItem('_ba_ba_orders');
     var _oldRaw = oldOrdersStr ? JSON.parse(oldOrdersStr) : [];
     var oldOrders = Array.isArray(_oldRaw) ? _oldRaw : Object.values(_oldRaw || {}).filter(function(x){ return x && typeof x === 'object'; });
@@ -648,8 +665,22 @@ function startFirebaseListeners() {
       _lastOrderCount = newPending.length;
     }
 
-    // Save to cache
-    try { localStorage.setItem('_ba_ba_orders', JSON.stringify(newOrders)); } catch(e) {}
+    // Save to cache - ne jamais réduire le nombre de commandes (protection perte)
+    try {
+      var existingStr = localStorage.getItem('_ba_ba_orders');
+      var existing = existingStr ? JSON.parse(existingStr) : [];
+      if (!Array.isArray(existing)) existing = Object.values(existing||{}).filter(function(x){return x&&x.id;});
+      // Fusionner : garder toutes les commandes existantes + nouvelles de Firebase
+      var merged = existing.slice();
+      newOrders.forEach(function(o){
+        if (!o || !o.id) return;
+        var i = merged.findIndex(function(x){ return x && x.id === o.id; });
+        if (i >= 0) merged[i] = o; else merged.push(o);
+      });
+      localStorage.setItem('_ba_ba_orders', JSON.stringify(merged));
+      // Mettre à jour newOrders pour les comparaisons suivantes
+      newOrders = merged;
+    } catch(e) {}
 
     // Refresh UI if on relevant screen
     if (currentScreen === 'orders' && !isAdmin) renderOrders();
@@ -880,9 +911,8 @@ function getUsers() {
 function getOrders() {
   var v = load('ba_orders', []);
   if (!v) return [];
-  if (Array.isArray(v)) return v;
-  // Firebase peut retourner un objet au lieu d'un tableau
-  return Object.values(v).filter(function(x){ return x && typeof x === 'object'; });
+  var arr = Array.isArray(v) ? v : Object.values(v).filter(function(x){ return x && typeof x === 'object'; });
+  return arr.filter(function(x){ return x && x.id; });
 }
 function getProducts() {
   var deleted = load('ba_deleted_products', []);
@@ -961,8 +991,10 @@ function saveOrder(order) {
   var idx = orders.findIndex(function(o){ return o.id === order.id; });
   if (idx >= 0) orders[idx] = order; else orders.push(order);
   try { localStorage.setItem('_ba_ba_orders', JSON.stringify(orders)); } catch(e) {}
-  // Écrire dans Firebase par ID (pas en tableau) pour permettre data/ba_orders/<id>
+  // Écrire dans Firebase par ID
   db.ref('data/ba_orders/'+order.id).set(order).catch(function(e){ console.warn('FB saveOrder:',e); });
+  // Backup dans un nœud séparé pour récupération d'urgence
+  db.ref('backup/orders/'+order.id).set(order).catch(function(e){});
   try { localStorage.setItem('_ba_ba_last_save', JSON.stringify(new Date().toISOString())); } catch(e) {}
 }
 function saveProduct(p) {
@@ -3016,6 +3048,22 @@ function sendMsgToCreneau() {
   if(el) el.value = '';
 }
 
+// ══ RÉCUPÉRATION D'URGENCE DES COMMANDES ══
+function recoverOrdersFromBackup() {
+  db.ref('backup/orders').once('value').then(function(snap) {
+    var v = snap.val();
+    if (!v) { toast('Aucun backup trouvé', 'error'); return; }
+    var backupOrders = Array.isArray(v) ? v : Object.values(v).filter(function(x){ return x && x.id; });
+    if (!backupOrders.length) { toast('Backup vide', 'error'); return; }
+    // Fusionner avec ba_orders Firebase
+    var updates = {};
+    backupOrders.forEach(function(o){ updates[o.id] = o; });
+    db.ref('data/ba_orders').update(updates).then(function(){
+      toast('✅ '+backupOrders.length+' commandes récupérées depuis le backup !', 'success', 5000);
+    });
+  });
+}
+
 function adminDashboard(){
   var orders = getOrders();
   var today = new Date().toISOString().split('T')[0];
@@ -3104,6 +3152,9 @@ function adminDashboard(){
 
   // WhatsApp export button
   html += '<div class="sec-title">📤 Export</div>'
+    +'<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">'
+    +'<button class="btn btn-sm" style="background:rgba(239,68,68,.15);border-color:#ef4444;color:#ef4444" onclick="recoverOrdersFromBackup()">🔄 Récupérer depuis backup</button>'
+    +'</div>'
     +'<div style="display:flex;gap:.5rem;margin-bottom:1rem">'
     +'<button class="btn btn-secondary btn-sm" style="flex:1;background:rgba(37,211,102,.15);border-color:rgba(37,211,102,.4);color:#25d366" onclick="exportWhatsApp()">💬 Résumé WhatsApp</button>'
     +'<button class="btn btn-secondary btn-sm" style="flex:1" onclick="adminTab(&apos;stats&apos;,document.querySelector(&apos;.admin-tab:nth-child(3)&apos;))">📊 Statistiques</button>'
