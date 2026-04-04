@@ -3651,6 +3651,7 @@ function shareManualMsg(btn) {
 function adminOrders(){
   var html_top='<div style="padding:.5rem .9rem .75rem">';
   html_top+='<button class="btn btn-primary btn-full" onclick="openManualOrder()">📝 Saisir une commande client</button>';
+  html_top+='<button class="btn btn-sm btn-full" style="margin-top:.4rem;background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#ef4444" onclick="recoverOrdersFromBackup()">🔄 Restaurer commandes perdues (backup)</button>';
   html_top+='<div style="margin-top:.5rem"><div class="text-sm text-muted" style="margin-bottom:.35rem">⏰ Créneaux ce soir — appuyez pour bloquer/débloquer :</div>';
   html_top+='<div style="display:flex;flex-wrap:wrap;gap:.35rem">'+buildSlotToggles()+'</div></div>';
   html_top+='</div>';
