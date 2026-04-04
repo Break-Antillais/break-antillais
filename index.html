@@ -1000,6 +1000,8 @@ function saveOrder(order) {
   var dateKey = (order.pickupDate || new Date().toISOString().split('T')[0]);
   db.ref('data/ba_journal/'+dateKey+'/'+order.id).set(archiveData).catch(function(e){});
   try { localStorage.setItem('_ba_ba_last_save', JSON.stringify(new Date().toISOString())); } catch(e) {}
+  // Déclencher snapshot différé (sans bloquer)
+  setTimeout(function(){ if (typeof snapshotAll === 'function') snapshotAll(); }, 3000);
 }
 function saveProduct(p) {
   var pToSave = Object.assign({}, p);
@@ -2634,6 +2636,77 @@ function renderOrders(){
   html+='</div>';
   sc.innerHTML=html;
 }
+function clientCancelOrder(orderId) {
+  // Chercher la commande
+  var o = getOrders().find(function(x){ return x.id === orderId; });
+  if (!o) { toast('Commande introuvable', 'error'); return; }
+  if (o.status !== 'pending' && o.status !== 'confirmed') {
+    toast('Cette commande ne peut plus être annulée', 'warning'); return;
+  }
+  // Modale de confirmation
+  var m = document.getElementById('m-product');
+  var itemsList = (o.items||[]).map(function(i){ return '• '+i.name; }).join('<br>');
+  m.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
+    + '<div class="modal"><div class="modal-handle"></div>'
+    + '<div style="text-align:center;margin-bottom:.75rem"><div style="font-size:2.5rem">❌</div>'
+    + '<h2 class="modal-title">Annuler la commande ?</h2></div>'
+    + '<div style="background:var(--dark3);border-radius:var(--radius);padding:.75rem 1rem;margin-bottom:1rem;font-size:.85rem;line-height:1.7">'
+    + itemsList
+    + '<div class="text-gold fw-700" style="margin-top:.5rem">'+fmt(o.total||0)+' · Retrait '+o.pickupTime+'</div></div>'
+    + '<p class="text-sm text-muted" style="margin-bottom:1rem">Êtes-vous sûr de vouloir annuler cette commande ? Cette action est irréversible.</p>'
+    + '<button class="btn btn-full mb-1" style="background:#ef4444;color:#fff;border:none" data-oid="'+o.id+'" onclick="clientConfirmCancel(this.dataset.oid)">Oui, annuler ma commande</button>'
+    + '<button class="btn btn-secondary btn-full" onclick="closeModal(&apos;m-product&apos;)">Non, garder ma commande</button>'
+    + '</div></div>';
+  m.style.display = 'block';
+}
+
+function clientConfirmCancel(orderId) {
+  db.ref('data/ba_orders/'+orderId).once('value').then(function(snap){
+    var o = snap.val();
+    if (!o) { o = getOrders().find(function(x){ return x.id===orderId; }); }
+    if (!o) { toast('Commande introuvable', 'error'); return; }
+    o.status = 'cancelled';
+    o.cancelReason = 'Annulée par le client';
+    o.cancelledAt = new Date().toISOString();
+    saveOrder(o);
+    // Remettre le stock des produits commandés
+    var prods = getProducts();
+    var agoulouQty = 0;
+    (o.items||[]).forEach(function(item){
+      var p = prods.find(function(x){ return x.id===(item.pid||item.id); });
+      if (!p) return;
+      if (p.cat === 'agoulou') {
+        agoulouQty += (item.qty||1);
+      } else if (p.stock !== null && p.stock !== undefined) {
+        p.stock = p.stock + (item.qty||1);
+        p.ok = true;
+        saveProduct(p);
+        db.ref('data/ba_products/'+p.id).update({stock: p.stock, ok: true});
+      }
+    });
+    // Remettre stock agoulou partagé
+    if (agoulouQty > 0) {
+      var agoulousAll = prods.filter(function(p){ return p.cat==='agoulou'; });
+      var stockRef = agoulousAll.find(function(p){ return p.stock !== null && p.stock !== undefined; });
+      if (stockRef) {
+        var newStock = (stockRef.stock||0) + agoulouQty;
+        agoulousAll.forEach(function(p){
+          p.stock = newStock;
+          p.ok = newStock > 0;
+          saveProduct(p);
+          db.ref('data/ba_products/'+p.id).update({stock: newStock, ok: p.ok});
+        });
+      }
+    }
+    closeModal('m-product');
+    toast('Commande annulée.', 'info', 4000);
+    // Notifier l'admin
+    var adminUsers = getUsers().filter(function(u){ return u.role==='superadmin'||u.role==='admin'; });
+    adminUsers.forEach(function(a){ notify(a.id, '❌ Commande annulée', 'Le client '+o.userPrenom+' a annulé sa commande N°'+o.orderNumber+'.'); });
+    renderOrders();
+  }).catch(function(e){ toast('Erreur: '+e.message, 'error'); });
+}
+
 function orderCard(o){
   var st=STATUTS[o.status]||STATUTS.pending;
   var steps=['confirmed','preparing','ready','picked_up'];
@@ -2673,6 +2746,10 @@ function orderCard(o){
   }
   if(o.status==='picked_up'||o.status==='cancelled'){
     html+='<button class="btn btn-secondary btn-sm btn-full mt-2" data-oid="'+o.id+'" onclick="reorder(this.dataset.oid)">🔄 Recommander la même chose</button>';
+  }
+  // Annulation possible seulement si pending ou confirmed
+  if(o.status==='pending'||o.status==='confirmed'){
+    html+='<button class="btn btn-sm btn-full mt-2" style="background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#ef4444" data-oid="'+o.id+'" onclick="clientCancelOrder(this.dataset.oid)">❌ Annuler ma commande</button>';
   }
   html+='</div>';
   return html;
@@ -3090,6 +3167,87 @@ function recoverOrdersFromBackup() {
       }).catch(function(e){ toast('Erreur: '+e.message, 'error'); });
     });
   }).catch(function(e){ toast('Erreur récupération: '+e.message, 'error'); });
+}
+
+// ══ PROTECTION DONNÉES ══
+// Snapshot automatique toutes les 5 minutes dans data/snapshot/latest
+// + double-write sur chaque sauvegarde critique
+
+function snapshotAll() {
+  try {
+    var users   = getUsers();
+    var orders  = getOrders();
+    var prods   = getProducts();
+    var cfg     = getCfg();
+    var meats   = getMeats();
+    var sauces  = getSauces();
+    var paliers = load('ba_paliers', []);
+
+    // Snapshot complet dans Firebase sous data/snapshot/latest
+    var snap = {
+      at: new Date().toISOString(),
+      ba_users: users,
+      ba_orders: orders,
+      ba_products: prods,
+      ba_cfg: cfg,
+      ba_meats: meats,
+      ba_sauces: sauces,
+      ba_paliers: paliers
+    };
+    db.ref('data/snapshot/latest').set(snap).catch(function(e){ console.warn('snapshot:', e); });
+
+    // Snapshot daté (gardé 7 jours) — clé = date du jour
+    var dateKey = new Date().toISOString().split('T')[0];
+    db.ref('data/snapshot/'+dateKey).set(snap).catch(function(e){});
+
+    console.log('[BA] Snapshot sauvegardé', new Date().toLocaleTimeString('fr-FR'));
+  } catch(e) { console.warn('snapshotAll error:', e); }
+}
+
+function restoreFromSnapshot() {
+  toast('Restauration en cours...', 'info', 2000);
+  db.ref('data/snapshot/latest').once('value').then(function(snap) {
+    var d = snap.val();
+    if (!d) {
+      // Essayer depuis ba_safe + ba_journal
+      recoverOrdersFromBackup();
+      return;
+    }
+    var restored = 0;
+    // Restaurer commandes (fusion)
+    if (d.ba_orders && Array.isArray(d.ba_orders) && d.ba_orders.length) {
+      var existing = getOrders();
+      d.ba_orders.forEach(function(o){
+        if (!o || !o.id) return;
+        var i = existing.findIndex(function(x){ return x && x.id === o.id; });
+        if (i >= 0) existing[i] = o; else existing.push(o);
+        db.ref('data/ba_orders/'+o.id).set(o).catch(function(e){});
+      });
+      try { localStorage.setItem('_ba_ba_orders', JSON.stringify(existing)); } catch(e) {}
+      restored += d.ba_orders.length;
+    }
+    // Restaurer utilisateurs
+    if (d.ba_users && Array.isArray(d.ba_users) && d.ba_users.length) {
+      d.ba_users.forEach(function(u){ if (u && u.id) db.ref('data/users/'+u.id).set(u).catch(function(e){}); });
+      try { localStorage.setItem('_ba_ba_users', JSON.stringify(d.ba_users)); } catch(e) {}
+    }
+    // Restaurer produits
+    if (d.ba_products && Array.isArray(d.ba_products) && d.ba_products.length) {
+      try { localStorage.setItem('_ba_ba_products', JSON.stringify(d.ba_products)); } catch(e) {}
+    }
+    toast('✅ Restauration terminée — '+restored+' commandes récupérées', 'success', 6000);
+    var ac = document.getElementById('admin-content');
+    if (ac) ac.innerHTML = adminOrders();
+  }).catch(function(e){ toast('Erreur: '+e.message, 'error'); });
+}
+
+function startSnapshotTimer() {
+  // Premier snapshot après 30s (app bien chargée)
+  setTimeout(function(){
+    snapshotAll();
+    // Puis toutes les 5 minutes
+    setInterval(snapshotAll, 5 * 60 * 1000);
+  }, 30000);
 }
 
 function adminDashboard(){
@@ -3679,7 +3837,7 @@ function shareManualMsg(btn) {
 function adminOrders(){
   var html_top='<div style="padding:.5rem .9rem .75rem">';
   html_top+='<button class="btn btn-primary btn-full" onclick="openManualOrder()">📝 Saisir une commande client</button>';
-  html_top+='<button class="btn btn-sm btn-full" style="margin-top:.4rem;background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#ef4444" onclick="recoverOrdersFromBackup()">🔄 Restaurer commandes perdues (backup)</button>';
+  html_top+='<button class="btn btn-sm btn-full" style="margin-top:.4rem;background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#ef4444" onclick="restoreFromSnapshot()">🔄 Restaurer depuis snapshot</button>';
   html_top+='<div style="margin-top:.5rem"><div class="text-sm text-muted" style="margin-bottom:.35rem">⏰ Créneaux ce soir — appuyez pour bloquer/débloquer :</div>';
   html_top+='<div style="display:flex;flex-wrap:wrap;gap:.35rem">'+buildSlotToggles()+'</div></div>';
   html_top+='</div>';
@@ -6696,6 +6854,7 @@ function startCountdown() {
     }, 1500);
     startOrderPolling();
     startCountdown();
+    startSnapshotTimer(); // Protection données toutes les 5min
   // Parallax scroll sur la home
 
   });
