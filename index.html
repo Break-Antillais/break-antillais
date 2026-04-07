@@ -1920,6 +1920,20 @@ function continueOpenProduct(id) {
     +'</div>'
     +modalVisualHtml
     +'<h2 class="modal-title text-center">'+p.name+'</h2>'
+    +(function(){
+      // Badge stock faible
+      var stockVal = null;
+      if (p.cat === 'agoulou') {
+        var ar = getProducts().find(function(x){ return x.cat==='agoulou' && x.stock !== null && x.stock !== undefined; });
+        if (ar) stockVal = ar.stock;
+      } else if (p.stock !== null && p.stock !== undefined) {
+        stockVal = p.stock;
+      }
+      if (stockVal === null) return '';
+      if (stockVal === 0) return '<div style="text-align:center;margin-bottom:.4rem"><span style="background:rgba(107,114,128,.2);color:#6b7280;font-size:.75rem;font-weight:700;padding:.2rem .65rem;border-radius:100px">Épuisé</span></div>';
+      if (stockVal <= 5) return '<div style="text-align:center;margin-bottom:.4rem"><span style="background:rgba(239,68,68,.12);color:#ef4444;font-size:.75rem;font-weight:700;padding:.2rem .65rem;border-radius:100px">⚠️ Plus que '+stockVal+' disponible'+(stockVal>1?'s':'')+'</span></div>';
+      return '';
+    })()
     +'<div style="text-align:center;font-family:var(--head);font-size:1.35rem;font-weight:800;color:var(--gold);margin-bottom:.4rem" id="modal-main-price">'+(p.isClassique?'—':fmt(p.price||0))+'</div>'
     +'<p style="text-align:center;font-size:.8rem;color:var(--muted);margin-bottom:.9rem">'+(p.desc||'')+'</div>';
 
@@ -2159,6 +2173,31 @@ function addToCart() {
     cartName = 'Bokit '+pendingExtras.meats[0];
   }
   var qtyToAdd = _pendingQty || 1;
+  // ── POINT 1 : Vérification stock avant ajout ──
+  if (pendingProd.cat === 'agoulou') {
+    // Stock partagé agoulou
+    var agoulouRef = getProducts().find(function(x){ return x.cat==='agoulou' && x.stock !== null && x.stock !== undefined; });
+    var agoulouStock = agoulouRef ? (agoulouRef.stock||0) : null;
+    // Compter les agoulou déjà dans le panier
+    var inCart = cart.filter(function(i){ return i.cat==='agoulou'; }).reduce(function(s,i){return s+(i.qty||1);},0);
+    if (agoulouStock !== null && (inCart + qtyToAdd) > agoulouStock) {
+      var reste = Math.max(0, agoulouStock - inCart);
+      if (reste === 0) toast('Désolé, les Agoulous sont épuisés !', 'error', 4000);
+      else toast('Désolé, il ne reste que '+reste+' Agoulou(s) disponible(s).', 'warning', 4000);
+      if (addBtn) addBtn._adding = false;
+      return;
+    }
+  } else if (pendingProd.stock !== null && pendingProd.stock !== undefined) {
+    // Stock individuel (boissons etc.)
+    var inCartProd = cart.filter(function(i){ return i.pid===pendingProd.id; }).reduce(function(s,i){return s+(i.qty||1);},0);
+    if ((inCartProd + qtyToAdd) > pendingProd.stock) {
+      var resteProd = Math.max(0, pendingProd.stock - inCartProd);
+      if (resteProd === 0) toast('Désolé, ce produit est épuisé !', 'error', 4000);
+      else toast('Désolé, il ne reste que '+resteProd+' article(s) disponible(s).', 'warning', 4000);
+      if (addBtn) addBtn._adding = false;
+      return;
+    }
+  }
   // Mode commande manuelle admin
   if (_manualOrderMode) {
     for (var qi = 0; qi < qtyToAdd; qi++) {
@@ -2461,6 +2500,51 @@ function confirmOrder(){
   confirmBtn && (confirmBtn._loading = true);
   var user=getCurrentUser();
   if(!user||!_slot||!_payment) { btnReset(confirmBtn); if(confirmBtn) confirmBtn._loading=false; return; }
+  // ── POINT 3 : Double vérif stock en temps réel depuis Firebase ──
+  db.ref('data/ba_products').once('value').then(function(snapProds) {
+    var freshProds = snapProds.val();
+    if (freshProds) {
+      var freshArr = Array.isArray(freshProds) ? freshProds : Object.values(freshProds).filter(function(x){return x&&x.id;});
+      // Vérifier chaque item du panier
+      var stockError = null;
+      // Compter agoulou
+      var agoulouQtyCart = cart.filter(function(i){return i.cat==='agoulou';}).reduce(function(s,i){return s+(i.qty||1);},0);
+      if (agoulouQtyCart > 0) {
+        var freshAgoulou = freshArr.find(function(p){return p.cat==='agoulou' && p.stock !== null && p.stock !== undefined;});
+        if (freshAgoulou && agoulouQtyCart > freshAgoulou.stock) {
+          stockError = 'Désolé, il ne reste que '+freshAgoulou.stock+' Agoulou(s). Votre panier a été ajusté.';
+          // Retirer les agoulou en trop du panier
+          var excess = agoulouQtyCart - freshAgoulou.stock;
+          for (var ri = cart.length-1; ri >= 0 && excess > 0; ri--) {
+            if (cart[ri].cat === 'agoulou') { cart.splice(ri, 1); excess--; }
+          }
+        }
+      }
+      // Vérifier autres produits à stock
+      if (!stockError) {
+        var cartByPid = {};
+        cart.forEach(function(i){ cartByPid[i.pid||i.id] = (cartByPid[i.pid||i.id]||0) + (i.qty||1); });
+        Object.keys(cartByPid).forEach(function(pid){
+          var fp = freshArr.find(function(p){return p.id===pid;});
+          if (fp && fp.stock !== null && fp.stock !== undefined && cartByPid[pid] > fp.stock) {
+            if (!stockError) stockError = 'Désolé, le stock de "'+fp.name+'" a changé. Il ne reste que '+fp.stock+' article(s). Veuillez ajuster votre panier.';
+          }
+        });
+      }
+      if (stockError) {
+        btnReset(confirmBtn); if(confirmBtn) confirmBtn._loading=false;
+        updateBadges();
+        toast(stockError, 'error', 6000);
+        return;
+      }
+    }
+    _doConfirmOrder(confirmBtn);
+  }).catch(function(){
+    // Si Firebase inaccessible, continuer quand même
+    _doConfirmOrder(confirmBtn);
+  });
+}
+function _doConfirmOrder(confirmBtn) {
   var cfg=getCfg();
   var today=window._selectedDate||new Date().toISOString().split('T')[0];
   var total=cart.reduce(function(s,i){return s+i.price*i.qty;},0);
