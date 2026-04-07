@@ -2541,161 +2541,187 @@ function btnReset(btn) {
 }
 
 function confirmOrder(){
-  // Anti-double-clic
   var confirmBtn = document.getElementById('confirm-btn');
-  if (confirmBtn && confirmBtn.disabled && confirmBtn._loading) return;
-  btnLoading(confirmBtn, '⏳ Validation...');
-  confirmBtn && (confirmBtn._loading = true);
-  var user=getCurrentUser();
-  if(!user||!_slot||!_payment) { btnReset(confirmBtn); if(confirmBtn) confirmBtn._loading=false; return; }
-  // ── POINT 3 : Double vérif stock en temps réel depuis Firebase ──
-  db.ref('data/ba_products').once('value').then(function(snapProds) {
+  if (confirmBtn && confirmBtn._loading) return;
+  var user = getCurrentUser();
+  if (!user||!_slot||!_payment) { toast('Sélectionnez un créneau et un mode de paiement','warning'); return; }
+
+  console.log('[BA] Etape 0 : vérification stock...');
+
+  // Vérif stock Firebase AVANT de bloquer le bouton
+  db.ref('data/ba_products').once('value').then(function(snapProds){
     var freshProds = snapProds.val();
     if (freshProds) {
       var freshArr = Array.isArray(freshProds) ? freshProds : Object.values(freshProds).filter(function(x){return x&&x.id;});
-      // Vérifier chaque item du panier
       var stockError = null;
-      // Compter agoulou
       var agoulouQtyCart = cart.filter(function(i){return i.cat==='agoulou';}).reduce(function(s,i){return s+(i.qty||1);},0);
       if (agoulouQtyCart > 0) {
-        var freshAgoulou = freshArr.find(function(p){return p.cat==='agoulou' && p.stock !== null && p.stock !== undefined;});
-        if (freshAgoulou && agoulouQtyCart > freshAgoulou.stock) {
-          stockError = 'Désolé, il ne reste que '+freshAgoulou.stock+' Agoulou(s). Votre panier a été ajusté.';
-          // Retirer les agoulou en trop du panier
-          var excess = agoulouQtyCart - freshAgoulou.stock;
-          for (var ri = cart.length-1; ri >= 0 && excess > 0; ri--) {
-            if (cart[ri].cat === 'agoulou') { cart.splice(ri, 1); excess--; }
-          }
+        var fa = freshArr.find(function(p){return p.cat==='agoulou'&&p.stock!==null&&p.stock!==undefined;});
+        if (fa && agoulouQtyCart > fa.stock) {
+          stockError = 'Il ne reste que '+fa.stock+' Agoulou(s) disponible(s).';
+          var excess = agoulouQtyCart - fa.stock;
+          for (var ri = cart.length-1; ri >= 0 && excess > 0; ri--) { if(cart[ri].cat==='agoulou'){cart.splice(ri,1);excess--;} }
         }
       }
-      // Vérifier autres produits à stock
       if (!stockError) {
-        var cartByPid = {};
-        cart.forEach(function(i){ cartByPid[i.pid||i.id] = (cartByPid[i.pid||i.id]||0) + (i.qty||1); });
-        Object.keys(cartByPid).forEach(function(pid){
+        var byPid = {};
+        cart.forEach(function(i){ byPid[i.pid||i.id]=(byPid[i.pid||i.id]||0)+(i.qty||1); });
+        Object.keys(byPid).forEach(function(pid){
           var fp = freshArr.find(function(p){return p.id===pid;});
-          if (fp && fp.stock !== null && fp.stock !== undefined && cartByPid[pid] > fp.stock) {
-            if (!stockError) stockError = 'Désolé, le stock de "'+fp.name+'" a changé. Il ne reste que '+fp.stock+' article(s). Veuillez ajuster votre panier.';
-          }
+          if (fp&&fp.stock!==null&&fp.stock!==undefined&&byPid[pid]>fp.stock)
+            if (!stockError) stockError='Le stock de "'+fp.name+'" a changé : il ne reste que '+fp.stock+' article(s).';
         });
       }
       if (stockError) {
-        btnReset(confirmBtn); if(confirmBtn) confirmBtn._loading=false;
+        console.log('[BA] Etape 0 ECHEC :', stockError);
         updateBadges();
-        toast(stockError, 'error', 6000);
+        showStockAlert(stockError);
         return;
       }
     }
-    _doConfirmOrder(confirmBtn);
-  }).catch(function(){
-    // Si Firebase inaccessible, continuer quand même
-    _doConfirmOrder(confirmBtn);
+    console.log('[BA] Etape 1 : stock OK, lancement commande');
+    // Stock OK → bloquer bouton + timer sécurité 8s
+    btnLoading(confirmBtn, '⏳ Validation...');
+    confirmBtn && (confirmBtn._loading = true);
+    var safetyTimer = setTimeout(function(){
+      console.warn('[BA] Sécurité : timeout 8s → déblocage bouton');
+      btnReset(confirmBtn);
+      if (confirmBtn) confirmBtn._loading = false;
+    }, 8000);
+    _doConfirmOrder(confirmBtn, safetyTimer);
+  }).catch(function(e){
+    console.log('[BA] Etape 0 : Firebase inaccessible, on continue', e);
+    btnLoading(confirmBtn, '⏳ Validation...');
+    confirmBtn && (confirmBtn._loading = true);
+    var safetyTimer = setTimeout(function(){
+      btnReset(confirmBtn);
+      if (confirmBtn) confirmBtn._loading = false;
+    }, 8000);
+    _doConfirmOrder(confirmBtn, safetyTimer);
   });
 }
-function _doConfirmOrder(confirmBtn) {
-  var cfg=getCfg();
-  var today=window._selectedDate||new Date().toISOString().split('T')[0];
-  var total=cart.reduce(function(s,i){return s+i.price*i.qty;},0);
-  var orders=getOrders();
-  var num=String(orders.length+1).padStart(4,'0');
-  var discount = _selectedReduction ? (_selectedReduction.discount||0) : 0;
-  var finalTotal = Math.max(0, total - discount);
-  // Mark promo as used
-  if (_selectedReduction && _selectedReduction.type === 'promo') {
-    var promos = load('ba_promos', []);
-    var pi = promos.findIndex(function(p){ return p.id === _selectedReduction.promoId; });
-    if (pi >= 0) { promos[pi].used = true; save('ba_promos', promos); }
-  }
-  var order={
-    id:genId(),orderNumber:num,userId:user.id,userPrenom:user.prenom,userPhone:user.phone,
-    items:cart.slice(),total:finalTotal,originalTotal:total,
-    pointsDiscount:_selectedReduction?_selectedReduction.pts:0,
-    discountLabel:_selectedReduction?_selectedReduction.label:null,
-    pickupDate:today,pickupTime:_slot,
-    payment:_payment==='card'?'Carte':'Especes',
-    status:'pending',createdAt:new Date().toISOString(),pointsAwarded:false
-  };
-  // Deduct points immediately if reduction used
-  if (_selectedReduction) {
-    user.points = Math.max(0, (user.points||0) - _selectedReduction.pts);
-    var hist = load('ba_pts_history_'+user.id, []);
-    hist.unshift({pts:-_selectedReduction.pts, label:'Reduction utilisee: '+_selectedReduction.label, at:new Date().toISOString()});
-    save('ba_pts_history_'+user.id, hist);
-    saveUser(user);
-    _selectedReduction = null;
-  }
-  // Deduct palier points if a palier reward is used
-  var rewardItem = cart.find(function(i){ return i.isReward && i.rewardPalier; });
-  if (rewardItem) {
-    var paliers = load('ba_paliers', PALIERS);
-    var rewardPal = paliers.find(function(p){ return p.name === rewardItem.rewardPalier; });
-    if (rewardPal) {
-      var palPts = rewardPal.pts || rewardPal.min || 0;
-      if (palPts > 0) {
-        user.points = Math.max(0, (user.points||0) - palPts);
-        var rHist = load('ba_pts_history_'+user.id, []);
-        rHist.unshift({pts:-palPts, label:'Recompense palier '+rewardItem.rewardPalier+' utilisee', at:new Date().toISOString()});
-        save('ba_pts_history_'+user.id, rHist);
-        db.ref('data/users/'+user.id+'/points').set(user.points);
-        saveUser(user);
+
+function _doConfirmOrder(confirmBtn, safetyTimer) {
+  console.log('[BA] Etape 2 : _doConfirmOrder démarrée');
+  try {
+    var user = getCurrentUser();
+    var cfg = getCfg();
+    var today = window._selectedDate||new Date().toISOString().split('T')[0];
+    var total = cart.reduce(function(s,i){return s+i.price*i.qty;},0);
+    var orders = getOrders();
+    var num = String(orders.length+1).padStart(4,'0');
+    var discount = _selectedReduction ? (_selectedReduction.discount||0) : 0;
+    var finalTotal = Math.max(0, total - discount);
+    // Mark promo as used
+    if (_selectedReduction && _selectedReduction.type === 'promo') {
+      var promos = load('ba_promos', []);
+      var pi = promos.findIndex(function(p){ return p.id === _selectedReduction.promoId; });
+      if (pi >= 0) { promos[pi].used = true; save('ba_promos', promos); }
+    }
+    var order = {
+      id:genId(), orderNumber:num, userId:user.id, userPrenom:user.prenom, userPhone:user.phone,
+      items:cart.slice(), total:finalTotal, originalTotal:total,
+      pointsDiscount:_selectedReduction?_selectedReduction.pts:0,
+      discountLabel:_selectedReduction?_selectedReduction.label:null,
+      pickupDate:today, pickupTime:_slot,
+      payment:_payment==='card'?'Carte':'Especes',
+      status:'pending', createdAt:new Date().toISOString(), pointsAwarded:false
+    };
+    // Deduct points if reduction used
+    if (_selectedReduction) {
+      user.points = Math.max(0, (user.points||0) - _selectedReduction.pts);
+      var hist = load('ba_pts_history_'+user.id, []);
+      hist.unshift({pts:-_selectedReduction.pts, label:'Reduction utilisee: '+_selectedReduction.label, at:new Date().toISOString()});
+      save('ba_pts_history_'+user.id, hist);
+      saveUser(user);
+      _selectedReduction = null;
+    }
+    // Deduct palier points
+    var rewardItem = cart.find(function(i){ return i.isReward && i.rewardPalier; });
+    if (rewardItem) {
+      var paliers = load('ba_paliers', PALIERS);
+      var rewardPal = paliers.find(function(p){ return p.name === rewardItem.rewardPalier; });
+      if (rewardPal) {
+        var palPts = rewardPal.pts || rewardPal.min || 0;
+        if (palPts > 0) {
+          user.points = Math.max(0, (user.points||0) - palPts);
+          var rHist = load('ba_pts_history_'+user.id, []);
+          rHist.unshift({pts:-palPts, label:'Recompense palier '+rewardItem.rewardPalier+' utilisee', at:new Date().toISOString()});
+          save('ba_pts_history_'+user.id, rHist);
+          db.ref('data/users/'+user.id+'/points').set(user.points);
+          saveUser(user);
+        }
       }
     }
-  }
-  saveOrder(order);
-  db.ref('data/ba_orders/'+order.id).set(order);
-  // Déduire le stock des produits commandés
-  (function(){
-    var prods = getProducts();
-    var changed = false;
-    // Compter le total d'agoulou commandés (stock partagé entre toutes les variantes)
-    var agoulouQty = 0;
-    order.items.forEach(function(item){
-      var p = prods.find(function(x){ return x.id===(item.pid||item.id); });
-      if (!p) return;
-      if (p.cat === 'agoulou') {
-        agoulouQty += (item.qty || 1);
-      } else if (p.stock !== null && p.stock !== undefined) {
-        // Autres produits avec stock individuel (boissons etc.)
-        var qty = item.qty || 1;
-        p.stock = Math.max(0, p.stock - qty);
-        if (p.stock === 0) p.ok = false;
-        saveProduct(p);
-        // Écrire dans Firebase de façon atomique
-        db.ref('data/ba_products/'+p.id).update({stock: p.stock, ok: p.ok});
-        changed = true;
-      }
-    });
-    // Déduire le stock partagé des agoulou sur TOUTES les variantes
-    if (agoulouQty > 0) {
-      var agoulousAll = prods.filter(function(p){ return p.cat === 'agoulou'; });
-      // Trouver le stock actuel (sur le premier agoulou qui en a un)
-      var stockRef = null;
-      agoulousAll.forEach(function(p){ if (p.stock !== null && p.stock !== undefined) stockRef = p; });
-      if (stockRef) {
-        var newStock = Math.max(0, stockRef.stock - agoulouQty);
-        var isEpuise = newStock === 0;
-        agoulousAll.forEach(function(p){
-          p.stock = newStock;
-          if (isEpuise) p.ok = false;
-          saveProduct(p);
-          db.ref('data/ba_products/'+p.id).update({stock: newStock, ok: p.ok});
-        });
-        changed = true;
-      }
-    }
-    if (changed) renderHome();
-  })();
-  cart=[]; try { localStorage.removeItem('_ba_cart'); } catch(e) {} closeModal('m-product'); updateBadges();
-  setTimeout(function(){
-    order.status='confirmed';
+    console.log('[BA] Etape 3 : commande N°'+num+' créée, sauvegarde...');
     saveOrder(order);
-    db.ref('data/ba_orders/'+order.id).set(order).catch(function(e){ console.warn('FB confirmOrder:',e); });
-    notify(user.id,'✅ Commande confirmee !','Votre commande est confirmee. Retrait a '+_slot+'.');
-  },2000);
-  // Send email confirmation
-  sendOrderEmail(order, user, cfg);
-  showOrderConfirm(order,cfg);
+    db.ref('data/ba_orders/'+order.id).set(order);
+    // Déduire le stock
+    (function(){
+      var prods = getProducts();
+      var changed = false;
+      var agoulouQty = 0;
+      order.items.forEach(function(item){
+        var p = prods.find(function(x){ return x.id===(item.pid||item.id); });
+        if (!p) return;
+        if (p.cat === 'agoulou') {
+          agoulouQty += (item.qty||1);
+        } else if (p.stock !== null && p.stock !== undefined) {
+          var qty = item.qty||1;
+          p.stock = Math.max(0, p.stock - qty);
+          if (p.stock === 0) p.ok = false;
+          saveProduct(p);
+          db.ref('data/ba_products/'+p.id).update({stock:p.stock, ok:p.ok});
+          changed = true;
+        }
+      });
+      if (agoulouQty > 0) {
+        var agoulousAll = prods.filter(function(p){ return p.cat==='agoulou'; });
+        var stockRef = null;
+        agoulousAll.forEach(function(p){ if (p.stock!==null&&p.stock!==undefined) stockRef=p; });
+        if (stockRef) {
+          var newStock = Math.max(0, stockRef.stock - agoulouQty);
+          agoulousAll.forEach(function(p){
+            p.stock = newStock;
+            if (newStock===0) p.ok = false;
+            saveProduct(p);
+            db.ref('data/ba_products/'+p.id).update({stock:newStock, ok:p.ok});
+          });
+          changed = true;
+        }
+      }
+      if (changed) renderHome();
+    })();
+    // Vider le panier et fermer la modale
+    cart = [];
+    try { localStorage.removeItem('_ba_cart'); } catch(e) {}
+    // ── Débloquer le bouton AVANT de fermer la modale ──
+    if (safetyTimer) clearTimeout(safetyTimer);
+    btnReset(confirmBtn);
+    if (confirmBtn) confirmBtn._loading = false;
+    console.log('[BA] Etape 4 : bouton débloqué, fermeture modale');
+    closeModal('m-product');
+    updateBadges();
+    // Passer en confirmed après 2s
+    setTimeout(function(){
+      order.status = 'confirmed';
+      saveOrder(order);
+      db.ref('data/ba_orders/'+order.id).set(order).catch(function(e){ console.warn('FB confirmOrder:',e); });
+      notify(user.id,'✅ Commande confirmee !','Votre commande est confirmee. Retrait a '+_slot+'.');
+    }, 2000);
+    // Email + modale de confirmation
+    sendOrderEmail(order, user, cfg);
+    console.log('[BA] Etape 5 : commande terminée avec succès ✅');
+    showOrderConfirm(order, cfg);
+  } catch(err) {
+    console.error('[BA] ERREUR _doConfirmOrder:', err);
+    if (safetyTimer) clearTimeout(safetyTimer);
+    btnReset(confirmBtn);
+    if (confirmBtn) confirmBtn._loading = false;
+    toast("Erreur réseau, votre commande n'a pas pu être prise en compte. Veuillez réessayer ou nous contacter via WhatsApp.", 'error', 8000);
+  }
 }
+
 
 function sendOrderEmail(order, user, cfg) {
   try {
