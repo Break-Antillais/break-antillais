@@ -48,6 +48,14 @@ body > *:not(#loading):not(#app-bg):not(nav):not(#m-product):not(#m-auth):not(.t
 
 
 @keyframes spin { to { transform: rotate(360deg); }
+@keyframes flashPresence {
+  0%,100% { background: var(--dark2); border-color: #f59e0b; box-shadow: 0 0 0 0 rgba(245,158,11,.7); }
+  50% { background: rgba(245,158,11,.12); border-color: #fbbf24; box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+}
+.presence-flash {
+  animation: flashPresence 0.8s ease infinite !important;
+  border: 2px solid #f59e0b !important;
+}
 @keyframes pulsePresence {
   0%,100% { box-shadow: 0 0 0 0 rgba(16,185,129,.6); border-color: #10b981; }
   50% { box-shadow: 0 0 0 8px rgba(16,185,129,0); border-color: #34d399; }
@@ -789,15 +797,22 @@ function startFirebaseListeners() {
       } else if (update.status === 'picked_up') {
         toast('✅ '+update.body, 'success', 5000);
       } else if (update.status === 'client_present') {
-        // Client signale sa présence → alerte sonore + toast persistant
-        toast('📍 '+update.title+' — '+update.body, 'success', 10000);
-        playAdminAlert();
-        if (navigator.vibrate) navigator.vibrate([200,100,200,100,200]);
-        // Rafraîchir l'UI admin pour afficher le badge
+        // Son dédié présence
+        if (_soundEnabled) playPresenceAlert();
+        else playAdminAlert();
+        if (navigator.vibrate) navigator.vibrate([100,50,100,50,300]);
+        // Toast persistant orange avec nom du client
+        toast('📍 '+update.title+' — '+update.body, 'success', 15000);
+        // Rafraîchir l'UI admin
         var ac2 = document.getElementById('admin-content');
         var activeTab2 = document.querySelector('.admin-tab.active');
         if (ac2 && activeTab2 && activeTab2.textContent.indexOf('Commandes') >= 0) {
           ac2.innerHTML = adminOrders();
+          // Flash sur la carte concernée
+          setTimeout(function(){
+            var card = document.getElementById('oc-'+update.orderId);
+            if (card) card.classList.add('presence-flash');
+          }, 150);
         }
       } else {
         // Message admin / offre / relance
@@ -3542,6 +3557,8 @@ function startSnapshotTimer() {
     // Puis toutes les 5 minutes
     setInterval(snapshotAll, 5 * 60 * 1000);
   }, 30000);
+  // Démarrer le polling présence admin
+  startPresencePolling();
 }
 
 function adminDashboard(){
@@ -4143,6 +4160,7 @@ function adminOrders(){
   var html_top='<div style="padding:.5rem .9rem .75rem">';
   html_top+='<button class="btn btn-primary btn-full" onclick="openManualOrder()">📝 Saisir une commande client</button>';
   html_top+='<button class="btn btn-sm btn-full" style="margin-top:.4rem;background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#ef4444" onclick="restoreFromSnapshot()">🔄 Restaurer depuis snapshot</button>';
+  html_top+='<button class="btn btn-sm btn-full" id="btn-enable-sound" style="margin-top:.35rem;background:rgba(245,158,11,.1);border:1px solid #f59e0b;color:#f59e0b" onclick="enableAdminSound(this)">🔔 Activer les alertes sonores</button>';
   html_top+='<div style="margin-top:.5rem"><div class="text-sm text-muted" style="margin-bottom:.35rem">⏰ Créneaux ce soir — appuyez pour bloquer/débloquer :</div>';
   html_top+='<div style="display:flex;flex-wrap:wrap;gap:.35rem">'+buildSlotToggles()+'</div></div>';
   html_top+='</div>';
@@ -4189,7 +4207,7 @@ function adminOrders(){
       return '<div style="margin-bottom:.2rem">'+itemText+'</div>';
     }).join('');
 
-    html+='<div class="card mb-2">'
+    html+='<div class="card mb-2 order-admin-card" id="oc-'+o.id+'">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.35rem">'
       +'<span class="font-head fw-800">N&deg;'+o.orderNumber+'</span>'
       +'<span class="status-badge" style="background:'+st.color+'22;color:'+st.color+'">'+st.icon+' '+st.label+'</span>'
@@ -6478,6 +6496,72 @@ function reorder(orderId) {
 var _lastOrderStatuses = {};
 var _lastOrderCount = -1;
 var _adminAlertEnabled = true;
+
+var _soundEnabled = false;
+function enableAdminSound(btn) {
+  // Débloquer AudioContext via interaction utilisateur
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx.resume().then(function() {
+      _soundEnabled = true;
+      if (btn) {
+        btn.textContent = "✅ Alertes sonores activées";
+        btn.style.background = "rgba(16,185,129,.1)";
+        btn.style.borderColor = "#10b981";
+        btn.style.color = "#10b981";
+        btn.disabled = true;
+      }
+      // Jouer un son de test
+      playPresenceAlert();
+      toast("🔔 Alertes sonores activées !", "success", 3000);
+    });
+  } catch(e) { toast("Impossible d'activer le son", "error"); }
+}
+
+// ══ VÉRIFICATION PRÉSENCE ADMIN toutes les 7s ══
+var _lastPresenceCheck = {};
+function startPresencePolling() {
+  setInterval(function(){
+    var user = getCurrentUser();
+    if (!user) return;
+    var isAdmin = user.role==='superadmin'||user.role==='admin'||user.role==='preparateur';
+    if (!isAdmin) return;
+    // Vérifier les commandes "ready" avec clientPresent dans le cache local
+    var readyOrders = getOrders().filter(function(o){
+      return o.status==='ready' && o.clientPresent === true;
+    });
+    readyOrders.forEach(function(o){
+      if (_lastPresenceCheck[o.id]) return; // déjà alerté
+      _lastPresenceCheck[o.id] = true;
+      console.log('[BA] Présence détectée (polling) : N°'+o.orderNumber);
+      if (_soundEnabled) playPresenceAlert(); else playAdminAlert();
+      toast('📍 '+o.userPrenom+' est sur place ! (N°'+o.orderNumber+')', 'success', 12000);
+      var card = document.getElementById('oc-'+o.id);
+      if (card) card.classList.add('presence-flash');
+      if (navigator.vibrate) navigator.vibrate([100,50,100,50,300]);
+    });
+  }, 7000);
+}
+
+function playPresenceAlert() {
+  // Son "ding" doux pour signaler la présence client
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [[1046,0,.08],[1318,.1,.08],[1568,.2,.15],[1318,.38,.08],[1568,.5,.25]].forEach(function(b){
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = b[0];
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime+b[1]);
+      gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime+b[1]+0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+b[1]+b[2]);
+      osc.start(ctx.currentTime+b[1]);
+      osc.stop(ctx.currentTime+b[1]+b[2]+0.05);
+    });
+  } catch(e) { console.warn('Son présence:', e); }
+  if (navigator.vibrate) navigator.vibrate([100,50,100,50,200]);
+}
 
 function playAdminAlert() {
   try {
