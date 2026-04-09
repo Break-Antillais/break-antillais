@@ -693,8 +693,30 @@ function startFirebaseListeners() {
       newOrders = merged;
     } catch(e) {}
 
-    // Refresh UI if on relevant screen
-    if (currentScreen === 'orders' && !isAdmin) renderOrders();
+    // Refresh UI - TOUJOURS pour le client, même si pas sur l'écran commandes
+    if (!isAdmin) {
+      // Vérifier si un statut a changé pour ce client
+      var hasChange = false;
+      var curUser = getCurrentUser();
+      if (curUser) {
+        newOrders.forEach(function(newO) {
+          if (!newO || newO.userId !== curUser.id) return;
+          var oldO = oldOrders.find(function(x){ return x && x.id === newO.id; });
+          if (!oldO || oldO.status !== newO.status || oldO.clientPresent !== newO.clientPresent) {
+            hasChange = true;
+            console.log('[BA] Changement détecté commande N°'+newO.orderNumber+' :', (oldO&&oldO.status)||'?', '->', newO.status);
+          }
+        });
+      }
+      // Rafraîchir l'écran commandes si visible ou si changement de statut
+      if (currentScreen === 'orders' || hasChange) {
+        renderOrders();
+        // Si on n'est pas sur commandes mais qu'il y a un changement, naviguer vers commandes
+        if (hasChange && currentScreen !== 'orders') {
+          console.log('[BA] Changement statut détecté, rafraîchissement silencieux');
+        }
+      }
+    }
     if (currentScreen === 'profile' && isAdmin) {
       var ac = document.getElementById('admin-content');
       var activeTab = document.querySelector('.admin-tab.active');
@@ -2824,6 +2846,23 @@ function renderOrders(){
   if(orders.length===0){
     html+='<div class="empty-state" style="padding:2.5rem 0"><div class="icon">📭</div><div class="title">Aucune commande</div><p class="text-sm">Passez votre premiere commande !</p></div>';
   }
+  // Écouter les changements en temps réel sur les commandes actives
+  active.forEach(function(o){
+    db.ref('data/ba_orders/'+o.id).on('value', function(snap){
+      var updated = snap.val();
+      if (!updated) return;
+      // Mettre à jour localStorage
+      var ords = getOrders();
+      var idx2 = ords.findIndex(function(x){ return x && x.id === updated.id; });
+      if (idx2 >= 0) ords[idx2] = updated; else ords.push(updated);
+      try { localStorage.setItem('_ba_ba_orders', JSON.stringify(ords)); } catch(e) {}
+      // Rafraîchir uniquement si on est sur l'écran commandes
+      if (currentScreen === 'orders') {
+        console.log('[BA] Mise à jour temps réel commande N°'+updated.orderNumber+' statut:', updated.status);
+        renderOrders();
+      }
+    });
+  });
   // Historique complet des points
   var ptsHist = load('ba_pts_history_'+user.id, []);
   if (ptsHist.length > 0) {
@@ -2954,6 +2993,7 @@ function clientConfirmCancel(orderId) {
 }
 
 function orderCard(o){
+  console.log("[BA] orderCard statut:", o.status, "| clientPresent:", o.clientPresent, "| N°"+o.orderNumber);
   var st=STATUTS[o.status]||STATUTS.pending;
   var steps=['confirmed','preparing','ready','picked_up'];
   var stepL={confirmed:'Confirmee',preparing:'En prep.',ready:'Prete',picked_up:'Recuperee'};
