@@ -2463,16 +2463,13 @@ function showCheckout() {
   var dates=[];
   var openDays = cfg.openDays||[2,3,4,5,6];
   var closedDates = cfg.closedDates||[];
-  for (var d=0; d<7; d++) {
-    var dt=new Date(); dt.setDate(dt.getDate()+d);
-    if (d===0 && !todayOpen) continue;
-    if (openDays.indexOf(dt.getDay()) < 0) continue;
-    var dtStr=dt.toISOString().split('T')[0];
-    if (closedDates.find(function(c){return c.date===dtStr;})) continue; // fermeture exceptionnelle
-    dates.push({
-      value: dt.toISOString().split('T')[0],
-      label: d===0 ? 'Aujourd&apos;hui' : d===1 ? 'Demain' : dt.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'short'})
-    });
+  // Commande pour le jour même uniquement
+  var dt=new Date();
+  var dtStr=dt.toISOString().split('T')[0];
+  if (todayOpen
+    && openDays.indexOf(dt.getDay()) >= 0
+    && !closedDates.find(function(c){return c.date===dtStr;})) {
+    dates.push({ value: dtStr, label: 'Aujourd&apos;hui' });
   }
   var _selDate = dates[0] ? dates[0].value : null;
   var total=cart.reduce(function(s,i){return s+i.price*i.qty;},0);
