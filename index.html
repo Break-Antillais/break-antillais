@@ -1793,7 +1793,7 @@ function filterCat(cat, btn) {
     prods.sort(function(a,b){ return ((freq[b.name]||0)+(b.featured?100:0)) - ((freq[a.name]||0)+(a.featured?100:0)); });
   } else {
     prods = allProds.filter(function(p){ return p.cat===cat; });
-    prods.sort(function(a,b){ return a.name.localeCompare(b.name,'fr'); });
+    prods.sort(function(a,b){ return (a.name||'').localeCompare(b.name||'','fr'); });
   }
   g.innerHTML = prods.length ? prods.map(pcardHTML).join('') : '<div class="empty-state" style="padding:2rem 0"><div class="icon">📭</div><p class="text-sm">Aucun produit dans cette categorie</p></div>';
   setTimeout(loadProductImages, 200);
@@ -4753,7 +4753,7 @@ function confirmCancelOrder(id) {
 
 function adminProducts(){
   var prods=getProducts();
-  prods.sort(function(a,b){ return a.name.localeCompare(b.name,'fr'); });
+  prods.sort(function(a,b){ return (a.name||'').localeCompare(b.name||'','fr'); });
   var html='<div style="padding:0 .9rem">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin:.75rem 0">'
     +'<span class="font-head fw-800" style="font-size:1.1rem">Produits ('+prods.length+')</span>'
