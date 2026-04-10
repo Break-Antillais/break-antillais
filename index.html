@@ -4357,67 +4357,184 @@ function openPrepView(orderId) {
     var o = snap.val();
     if (!o) { o = getOrders().find(function(x){ return x.id===orderId; }); }
     if (!o) { toast('Commande introuvable', 'error'); return; }
-
-    var m = document.getElementById('m-product');
-    var items = o.items || [];
-
-    // Construire les lignes produits en grand
-    var itemsHtml = '';
-    items.forEach(function(it, i) {
-      var dets = it.details ? it.details.split('|').map(function(d){ return d.trim(); }).filter(Boolean) : [];
-      itemsHtml += '<div style="background:var(--dark3);border-radius:12px;padding:.85rem 1rem;margin-bottom:.55rem">'
-        + '<div style="display:flex;align-items:center;gap:.6rem">'
-        + '<div style="background:var(--red);color:#fff;font-family:var(--head);font-weight:900;'
-        + 'font-size:1rem;min-width:28px;height:28px;border-radius:50%;'
-        + 'display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(i+1)+'</div>'
-        + '<div style="flex:1">'
-        + '<div style="font-family:var(--head);font-weight:800;font-size:1.05rem;line-height:1.3">'
-        + it.name + '</div>';
-      if (dets.length) {
-        dets.forEach(function(d){
-          itemsHtml += '<div style="font-size:.82rem;color:#f59e0b;font-weight:600;margin-top:.2rem">→ '+d+'</div>';
-        });
-      }
-      itemsHtml += '</div>'
-        + '<div style="font-weight:700;color:var(--gold);font-size:.9rem;white-space:nowrap">'+fmt(it.price||0)+'</div>'
-        + '</div></div>';
-    });
-
-    var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
-      + '<div class="modal" style="max-height:92vh;overflow-y:auto">'
-      + '<div class="modal-handle"></div>'
-      // En-tête
-      + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">'
-      + '<div>'
-      + '<div style="font-family:var(--head);font-weight:900;font-size:1.3rem;color:var(--red)">🍳 Préparation</div>'
-      + '<div style="font-size:.82rem;color:var(--muted)">N°'+o.orderNumber+' · '+o.userPrenom+'</div>'
-      + '</div>'
-      + '<div style="text-align:right">'
-      + '<div style="font-family:var(--head);font-weight:800;font-size:1.1rem;color:#f59e0b">⏰ '+o.pickupTime+'</div>'
-      + '<div style="font-size:.72rem;color:var(--muted)">'+(o.userPhone||'')+'</div>'
-      + '</div>'
-      + '</div>'
-      // Nombre d'articles
-      + '<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);'
-      + 'border-radius:10px;padding:.5rem .85rem;margin-bottom:.85rem;'
-      + 'display:flex;align-items:center;justify-content:space-between">'
-      + '<span style="font-weight:700;font-size:.9rem">'+items.length+' article'+(items.length>1?'s':'')+' à préparer</span>'
-      + '<span style="color:var(--gold);font-weight:800">'+fmt(o.total||0)+'</span>'
-      + '</div>'
-      // Liste produits
-      + itemsHtml
-      // Boutons
-      + '<div style="display:flex;gap:.5rem;margin-top:.75rem">'
-      + '<button class="btn btn-secondary" style="flex:1" onclick="closeModal(&apos;m-product&apos;)">Annuler</button>'
-      + '<button class="btn btn-primary" style="flex:2" data-oid="'+o.id+'" '
-      + 'onclick="advanceOrder(this.dataset.oid);closeModal(&apos;m-product&apos;)">'
-      + '✅ Confirmer et démarrer</button>'
-      + '</div>'
-      + '</div></div>';
-
-    m.innerHTML = html;
-    m.style.display = 'block';
+    _renderPrepModal(o);
   }).catch(function(e){ toast('Erreur: '+e.message, 'error'); });
+}
+
+function _renderPrepModal(o) {
+  var m = document.getElementById('m-product');
+  var items = o.items || [];
+  var isPreparing = (o.status === 'preparing');
+  var itemsStatus = o.itemsStatus || {};
+
+  // ── Compteur d'articles prêts ──
+  var doneCount = 0;
+  items.forEach(function(_, i){ if (itemsStatus[i] === 'done') doneCount++; });
+
+  // ── Liste des articles ──
+  var itemsHtml = '';
+  items.forEach(function(it, i) {
+    var isDone = itemsStatus[i] === 'done';
+    var dets = it.details ? it.details.split('|').map(function(d){ return d.trim(); }).filter(Boolean) : [];
+
+    itemsHtml += '<div id="prep-item-'+i+'" style="background:'+(isDone?'rgba(16,185,129,.1)':'var(--dark3)')+';'
+      + 'border:2px solid '+(isDone?'#10b981':'rgba(255,255,255,.06)')+';'
+      + 'border-radius:12px;padding:.85rem 1rem;margin-bottom:.55rem;transition:all .25s">'
+      + '<div style="display:flex;align-items:center;gap:.65rem">'
+      // Numéro / check
+      + '<div style="background:'+(isDone?'#10b981':'var(--red)')+';color:#fff;font-family:var(--head);font-weight:900;'
+      + 'font-size:1rem;min-width:30px;height:30px;border-radius:50%;'
+      + 'display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .25s">'
+      + (isDone ? '✓' : (i+1))+'</div>'
+      // Nom + détails
+      + '<div style="flex:1">'
+      + '<div style="font-family:var(--head);font-weight:800;font-size:1.05rem;line-height:1.3'+(isDone?';text-decoration:line-through;opacity:.6':'')+'">'+it.name+'</div>';
+    dets.forEach(function(d){
+      itemsHtml += '<div style="font-size:.82rem;color:#f59e0b;font-weight:600;margin-top:.15rem">→ '+d+'</div>';
+    });
+    itemsHtml += '</div>'
+      // Prix
+      + '<div style="text-align:right;flex-shrink:0">'
+      + '<div style="font-weight:700;color:var(--gold);font-size:.9rem">'+fmt(it.price||0)+'</div>';
+    // Bouton Prêt (visible seulement en mode préparation)
+    if (isPreparing && !isDone) {
+      itemsHtml += '<button class="btn btn-sm" style="margin-top:.3rem;background:rgba(16,185,129,.15);'
+        + 'border:1px solid #10b981;color:#10b981;font-size:.75rem;padding:.25rem .6rem"'
+        + ' data-oid="'+o.id+'" data-idx="'+i+'" onclick="prepMarkItem(this.dataset.oid,this.dataset.idx)">'
+        + '✅ Prêt</button>';
+    } else if (isDone) {
+      itemsHtml += '<div style="color:#10b981;font-size:.75rem;font-weight:700;margin-top:.2rem">Prêt ✓</div>';
+    }
+    itemsHtml += '</div></div></div>';
+  });
+
+  // ── Barre de progression ──
+  var pct = items.length ? Math.round(doneCount/items.length*100) : 0;
+  var progressHtml = isPreparing
+    ? '<div style="margin-bottom:.85rem">'
+      + '<div style="display:flex;justify-content:space-between;font-size:.78rem;margin-bottom:.3rem">'
+      + '<span style="font-weight:700">Progression</span>'
+      + '<span style="color:'+(pct===100?'#10b981':'#f59e0b')+';font-weight:800">'+doneCount+'/'+items.length+'</span>'
+      + '</div>'
+      + '<div style="background:var(--dark4);border-radius:100px;height:8px">'
+      + '<div style="background:'+(pct===100?'#10b981':'var(--red)')+';border-radius:100px;height:8px;width:'+pct+'%;transition:width .3s"></div>'
+      + '</div></div>'
+    : '';
+
+  // ── Boutons bas ──
+  var bottomHtml;
+  if (!isPreparing) {
+    // Vue initiale : Annuler + Confirmer
+    bottomHtml = '<div style="display:flex;gap:.5rem;margin-top:.75rem">'
+      + '<button class="btn btn-secondary" style="flex:1" onclick="closeModal(&apos;m-product&apos;)">Annuler</button>'
+      + '<button class="btn btn-primary" style="flex:2" data-oid="'+o.id+'"'
+      + ' onclick="prepStart(this.dataset.oid)">✅ Confirmer et démarrer</button>'
+      + '</div>';
+  } else if (doneCount === items.length) {
+    // Tout prêt → bouton passer en Prête
+    bottomHtml = '<div style="margin-top:.75rem">'
+      + '<button class="btn btn-primary btn-full" style="background:#10b981;border-color:#10b981;font-size:1rem;padding:.9rem"'
+      + ' data-oid="'+o.id+'" onclick="prepFinish(this.dataset.oid)">'
+      + '🎉 Tout est prêt — Avertir le client !</button>'
+      + '</div>';
+  } else {
+    // En cours
+    bottomHtml = '<div style="display:flex;gap:.5rem;margin-top:.75rem">'
+      + '<button class="btn btn-secondary btn-full" onclick="closeModal(&apos;m-product&apos;)">Réduire</button>'
+      + '</div>';
+  }
+
+  var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
+    + '<div class="modal" id="prep-modal-inner" style="max-height:92vh;overflow-y:auto">'
+    + '<div class="modal-handle"></div>'
+    // En-tête
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">'
+    + '<div>'
+    + '<div style="font-family:var(--head);font-weight:900;font-size:1.25rem;color:var(--red)">🍳 Préparation</div>'
+    + '<div style="font-size:.82rem;color:var(--muted)">N°'+o.orderNumber+' · '+o.userPrenom+'</div>'
+    + '</div>'
+    + '<div style="text-align:right">'
+    + '<div style="font-family:var(--head);font-weight:800;font-size:1.1rem;color:#f59e0b">⏰ '+o.pickupTime+'</div>'
+    + '<div style="font-size:.72rem;color:var(--muted)">'+(o.userPhone||'')+'</div>'
+    + '</div></div>'
+    // Résumé
+    + '<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);'
+    + 'border-radius:10px;padding:.5rem .85rem;margin-bottom:.75rem;'
+    + 'display:flex;align-items:center;justify-content:space-between">'
+    + '<span style="font-weight:700;font-size:.9rem">'+items.length+' article'+(items.length>1?'s':'')+' à préparer</span>'
+    + '<span style="color:var(--gold);font-weight:800">'+fmt(o.total||0)+'</span>'
+    + '</div>'
+    + progressHtml
+    + itemsHtml
+    + bottomHtml
+    + '</div></div>';
+
+  m.innerHTML = html;
+  m.style.display = 'block';
+}
+
+// Démarrer la préparation et rester dans la modale
+function prepStart(orderId) {
+  var btn = event && event.target;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Démarrage...'; }
+  db.ref('data/ba_orders/' + orderId).once('value').then(function(snap) {
+    var o = snap.val();
+    if (!o) { o = getOrders().find(function(x){ return x.id===orderId; }); }
+    o.status = 'preparing';
+    o.updatedAt = new Date().toISOString();
+    o.itemsStatus = {};
+    saveOrder(o);
+    db.ref('data/ba_orders/'+o.id).set(o);
+    notifyOrder(o.userId, '👨‍🍳 En preparation', 'Votre commande est en preparation.', 'preparing', o.id, o.orderNumber, o.pickupTime);
+    // Recharger la modale en mode préparation
+    _renderPrepModal(o);
+  }).catch(function(e){ toast('Erreur: '+e.message, 'error'); });
+}
+
+// Marquer un article comme prêt
+function prepMarkItem(orderId, itemIdx) {
+  var btn = event && event.target;
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  db.ref('data/ba_orders/' + orderId).once('value').then(function(snap) {
+    var o = snap.val();
+    if (!o) { o = getOrders().find(function(x){ return x.id===orderId; }); }
+    if (!o.itemsStatus) o.itemsStatus = {};
+    o.itemsStatus[parseInt(itemIdx)] = 'done';
+    o.updatedAt = new Date().toISOString();
+    saveOrder(o);
+    db.ref('data/ba_orders/'+o.id+'/itemsStatus').set(o.itemsStatus);
+    // Vérifier si tout est prêt
+    var items = o.items || [];
+    var allDone = items.every(function(_, i){ return o.itemsStatus[i] === 'done'; });
+    if (allDone) {
+      // Passer automatiquement en ready
+      prepFinishOrder(o);
+    } else {
+      _renderPrepModal(o);
+    }
+  }).catch(function(e){ if(btn){btn.disabled=false;btn.textContent='✅ Prêt';} toast('Erreur','error'); });
+}
+
+// Bouton "Tout est prêt" manuel
+function prepFinish(orderId) {
+  db.ref('data/ba_orders/' + orderId).once('value').then(function(snap) {
+    var o = snap.val();
+    if (!o) { o = getOrders().find(function(x){ return x.id===orderId; }); }
+    prepFinishOrder(o);
+  });
+}
+
+// Passer en ready et fermer la modale
+function prepFinishOrder(o) {
+  o.status = 'ready';
+  o.updatedAt = new Date().toISOString();
+  saveOrder(o);
+  db.ref('data/ba_orders/'+o.id).set(o);
+  notifyOrder(o.userId, '🎉 Prete !', 'Votre commande est prete ! Venez la recuperer.', 'ready', o.id, o.orderNumber, o.pickupTime);
+  closeModal('m-product');
+  toast('🎉 Commande prête ! Client averti.', 'success', 4000);
+  var ac = document.getElementById('admin-content');
+  if (ac) ac.innerHTML = adminOrders();
 }
 
 
