@@ -807,18 +807,30 @@ function startFirebaseListeners() {
       } else if (update.status === 'picked_up') {
         toast('✅ '+update.body, 'success', 5000);
       } else if (update.status === 'client_present') {
-        // Son dédié présence
-        if (_soundEnabled) playPresenceAlert();
-        else playAdminAlert();
-        if (navigator.vibrate) navigator.vibrate([100,50,100,50,300]);
-        // Toast persistant orange avec nom du client
-        toast('📍 '+update.title+' — '+update.body, 'success', 15000);
+        // Mêmes notifs que nouvelle commande
+        playAdminAlert();
+        if (navigator.vibrate) navigator.vibrate([200,100,200]);
+        // Bannière identique à nouvelle commande mais orange
+        var existing2 = document.getElementById('new-order-banner');
+        if (existing2) existing2.remove();
+        var banner2 = document.createElement('div');
+        banner2.id = 'new-order-banner';
+        banner2.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9998;background:linear-gradient(135deg,#92400e,#d97706);color:#fff;padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between;animation:slideDown .3s ease;box-shadow:0 4px 20px rgba(0,0,0,.5)';
+        banner2.innerHTML = '<div>'
+          +'<div style="font-family:var(--head);font-weight:800;font-size:1.05rem">📍 Client sur place !</div>'
+          +'<div style="font-size:.85rem;opacity:.9">'+update.title.replace('📍 ','')+'</div>'
+          +'</div>'
+          +'<div style="display:flex;gap:.5rem">'
+          +'<button style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:.45rem .9rem;border-radius:8px;cursor:pointer;font-weight:700;font-size:.85rem" onclick="document.getElementById(&quot;new-order-banner&quot;).remove();go(&quot;profile&quot;)">Voir</button>'
+          +'<button style="background:transparent;border:none;color:#fff;cursor:pointer;font-size:1.2rem;padding:.2rem .5rem" onclick="document.getElementById(&quot;new-order-banner&quot;).remove()">✕</button>'
+          +'</div>';
+        document.body.appendChild(banner2);
+        setTimeout(function(){ if(banner2.parentNode) banner2.remove(); }, 10000);
         // Rafraîchir l'UI admin
         var ac2 = document.getElementById('admin-content');
         var activeTab2 = document.querySelector('.admin-tab.active');
         if (ac2 && activeTab2 && activeTab2.textContent.indexOf('Commandes') >= 0) {
           ac2.innerHTML = adminOrders();
-          // Flash sur la carte concernée
           setTimeout(function(){
             var card = document.getElementById('oc-'+update.orderId);
             if (card) card.classList.add('presence-flash');
@@ -4181,7 +4193,7 @@ function adminOrders(){
   var html_top='<div style="padding:.5rem .9rem .75rem">';
   html_top+='<button class="btn btn-primary btn-full" onclick="openManualOrder()">📝 Saisir une commande client</button>';
   html_top+='<button class="btn btn-sm btn-full" style="margin-top:.4rem;background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#ef4444" onclick="restoreFromSnapshot()">🔄 Restaurer depuis snapshot</button>';
-  html_top+='<button class="btn btn-sm btn-full" id="btn-enable-sound" style="margin-top:.35rem;background:rgba(245,158,11,.1);border:1px solid #f59e0b;color:#f59e0b" onclick="enableAdminSound(this)">🔔 Activer les alertes sonores</button>';
+
   html_top+='<div style="margin-top:.5rem"><div class="text-sm text-muted" style="margin-bottom:.35rem">⏰ Créneaux ce soir — appuyez pour bloquer/débloquer :</div>';
   html_top+='<div style="display:flex;flex-wrap:wrap;gap:.35rem">'+buildSlotToggles()+'</div></div>';
   html_top+='</div>';
@@ -6624,11 +6636,26 @@ function startPresencePolling() {
       if (_lastPresenceCheck[o.id]) return; // déjà alerté
       _lastPresenceCheck[o.id] = true;
       console.log('[BA] Présence détectée (polling) : N°'+o.orderNumber);
-      if (_soundEnabled) playPresenceAlert(); else playAdminAlert();
-      toast('📍 '+o.userPrenom+' est sur place ! (N°'+o.orderNumber+')', 'success', 12000);
+      playAdminAlert();
+      if (navigator.vibrate) navigator.vibrate([200,100,200]);
+      // Bannière présence (même style que nouvelle commande)
+      var existPoll = document.getElementById('new-order-banner');
+      if (existPoll) existPoll.remove();
+      var bannerPoll = document.createElement('div');
+      bannerPoll.id = 'new-order-banner';
+      bannerPoll.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9998;background:linear-gradient(135deg,#92400e,#d97706);color:#fff;padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between;animation:slideDown .3s ease;box-shadow:0 4px 20px rgba(0,0,0,.5)';
+      bannerPoll.innerHTML = '<div>'
+        +'<div style="font-family:var(--head);font-weight:800;font-size:1.05rem">📍 Client sur place !</div>'
+        +'<div style="font-size:.85rem;opacity:.9">'+o.userPrenom+' est au point de retrait</div>'
+        +'</div>'
+        +'<div style="display:flex;gap:.5rem">'
+        +'<button style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:.45rem .9rem;border-radius:8px;cursor:pointer;font-weight:700;font-size:.85rem" onclick="document.getElementById(&quot;new-order-banner&quot;).remove();go(&quot;profile&quot;)">Voir</button>'
+        +'<button style="background:transparent;border:none;color:#fff;cursor:pointer;font-size:1.2rem;padding:.2rem .5rem" onclick="document.getElementById(&quot;new-order-banner&quot;).remove()">✕</button>'
+        +'</div>';
+      document.body.appendChild(bannerPoll);
+      setTimeout(function(){ if(bannerPoll.parentNode) bannerPoll.remove(); }, 10000);
       var card = document.getElementById('oc-'+o.id);
       if (card) card.classList.add('presence-flash');
-      if (navigator.vibrate) navigator.vibrate([100,50,100,50,300]);
     });
   }, 7000);
 }
