@@ -3345,7 +3345,7 @@ function renderProfile(){
     var pSeuil  = p.pts||p.min||0;
     var active  = palier.name===p.name;
     var unlocked= pts >= pSeuil;
-    var hasReward = p.reward && p.name!=='Bronze';
+    var hasReward = p.reward && p.choices && p.choices.length > 0;
     var choices = p.choices||[];
     var ptsManquants = Math.max(0, pSeuil - pts);
 
