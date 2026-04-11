@@ -7069,7 +7069,8 @@ function addRewardToCartByPalier(palierName) {
 
   var paliers = load('ba_paliers', PALIERS);
   var pal = paliers.find(function(p){ return p.name===palierName; });
-  if (!pal || !pal.reward) { toast('Recompense introuvable','error'); return; }
+  if (!pal) { toast('Recompense introuvable','error'); return; }
+  if (!pal.choices || !pal.choices.length) { toast('Aucun produit configuré pour ce palier','warning'); return; }
 
   var choices = pal.choices || [];
   if (!choices.length) {
@@ -7096,20 +7097,30 @@ function addRewardToCartByPalier(palierName) {
   // Try to match choices with actual products to show price/image
   var products = getProducts();
   choices.forEach(function(choiceName){
-    var prod = products.find(function(p){ return p.name === choiceName && p.ok; });
+    // Chercher par nom exact OU approximatif
+    var prod = products.find(function(p){ return p.name === choiceName; })
+             || products.find(function(p){ return p.name.toLowerCase().indexOf(choiceName.toLowerCase()) >= 0; });
+    // Vérifier stock
+    var stockEmpty = prod && prod.stock !== null && prod.stock !== undefined && prod.stock === 0;
+    var available = prod ? (prod.ok && !stockEmpty) : true;
     var choiceVisual = (prod && prod.image && prod.image.indexOf('__firebase__') !== 0)
-      ? '<img src="'+prod.image+'" alt="'+choiceName+'" onclick="event.stopPropagation();showPhotoFullscreen(this.src,\''+choiceName.replace(/\'/g,'')+'\')" style="width:42px;height:42px;border-radius:10px;object-fit:cover;cursor:zoom-in;border:1px solid var(--border)"/>'
-      : '<span style="font-size:1.8rem">'+(prod ? (EMOJI[prod.cat]||'🍽') : '🎁')+'</span>';
+      ? '<img src="'+prod.image+'" alt="'+choiceName+'" style="width:42px;height:42px;border-radius:10px;object-fit:cover;border:1px solid var(--border)'+(available?'':';opacity:.4')+'"/>'
+      : '<span style="font-size:1.8rem'+(available?'':';opacity:.4')+'">'+( prod ? (EMOJI[prod.cat]||'🍽') : '🎁')+'</span>';
     var desc = prod ? prod.desc : '';
-    html += '<div style="display:flex;align-items:center;gap:.85rem;padding:.75rem .9rem;background:var(--dark3);border:1.5px solid var(--border);border-radius:var(--radius-sm);cursor:pointer" '
-      +'data-choice="'+choiceName+'" data-palier="'+palierName+'" onclick="confirmRewardChoice(this.dataset.choice, this.dataset.palier)">'
-      +choiceVisual
-      +'<div style="flex:1">'
-      +'<div class="fw-700 text-sm">'+choiceName+'</div>'
-      +(desc?'<div style="font-size:.72rem;color:var(--muted)">'+desc+'</div>':'')
-      +'</div>'
-      +'<span style="color:#2d9e5f;font-weight:800;font-size:.9rem">Offert</span>'
-      +'</div>';
+    if (available) {
+      html += '<div style="display:flex;align-items:center;gap:.85rem;padding:.75rem .9rem;background:var(--dark3);border:1.5px solid var(--border);border-radius:var(--radius-sm);cursor:pointer" '
+        +'data-choice="'+choiceName+'" data-palier="'+palierName+'" onclick="confirmRewardChoice(this.dataset.choice, this.dataset.palier)">'
+        +choiceVisual
+        +'<div style="flex:1"><div class="fw-700 text-sm">'+choiceName+'</div>'
+        +(desc?'<div style="font-size:.72rem;color:var(--muted)">'+desc+'</div>':'')
+        +'</div><span style="color:#2d9e5f;font-weight:800;font-size:.9rem">Offert</span></div>';
+    } else {
+      html += '<div style="display:flex;align-items:center;gap:.85rem;padding:.75rem .9rem;background:var(--dark3);border:1.5px solid var(--border);border-radius:var(--radius-sm);opacity:.5">'
+        +choiceVisual
+        +'<div style="flex:1"><div class="fw-700 text-sm">'+choiceName+'</div>'
+        +'<div style="font-size:.72rem;color:#ef4444">Épuisé</div></div>'
+        +'<span style="color:#6b7280;font-size:.8rem">Indispo</span></div>';
+    }
   });
 
   html += '</div>'
@@ -7149,6 +7160,11 @@ function confirmRewardChoice(productName, palierName) {
     setTimeout(function(){ showRewardConfig(productName, palierName, prod); }, 50);
   } else {
     closeModal('m-product');
+    // Vérifier stock avant d'ajouter
+    var freshProd = getProducts().find(function(p){ return p.id === prod.id; });
+    if (freshProd && freshProd.stock !== null && freshProd.stock !== undefined && freshProd.stock === 0) {
+      toast('Désolé, ce produit est épuisé.', 'error'); return;
+    }
     cart.push({
       id: genId(),
       pid: prod.id,
@@ -7161,7 +7177,7 @@ function confirmRewardChoice(productName, palierName) {
       rewardPalier: palierName
     });
     updateBadges();
-    toast('🎁 '+productName+' ajoute au panier !','success', 4000);
+    toast('🎁 '+productName+' ajouté au panier !','success', 4000);
     go('cart');
   }
 }
