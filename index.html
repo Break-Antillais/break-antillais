@@ -7349,11 +7349,43 @@ function shareReferral(code) {
 function showMaintenanceScreen(msg) {
   var body = document.body;
   body.innerHTML = '<div style="position:fixed;inset:0;background:#0a0a0a;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:2rem;gap:1.5rem">'
-    +'<div style="font-family:var(--head);font-size:2.5rem;font-weight:900;color:#fff">Break <span style=\"color:#C8232B\">Antillais</span></div>'
+    +'<div style="font-family:var(--head);font-size:2.5rem;font-weight:900;color:#fff">Break <span style=\\"color:#C8232B\\">Antillais</span></div>'
     +'<div style="font-family:var(--head);font-size:1.5rem;font-weight:800;color:#fff">Fermeture temporaire</div>'
     +'<div style="font-size:1rem;color:rgba(255,255,255,.6);max-width:300px;line-height:1.6">'+msg+'</div>'
     +'<div style="font-size:.8rem;color:#C8232B;margin-top:.5rem">Revenez bientot !</div>'
+    +'<div style="margin-top:2rem;border-top:1px solid rgba(255,255,255,.08);padding-top:1.5rem;width:100%;max-width:320px">'
+    +'<div style="font-size:.75rem;color:rgba(255,255,255,.3);margin-bottom:.75rem">Accès administrateur</div>'
+    +'<input id="maint-email" type="email" placeholder="Email admin" style="width:100%;padding:.6rem .9rem;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.07);color:#fff;font-size:.9rem;margin-bottom:.5rem;box-sizing:border-box"/>'
+    +'<input id="maint-pwd" type="password" placeholder="Mot de passe" style="width:100%;padding:.6rem .9rem;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.07);color:#fff;font-size:.9rem;margin-bottom:.75rem;box-sizing:border-box"/>'
+    +'<button onclick="maintLogin()" style="width:100%;padding:.65rem;border-radius:8px;background:#C8232B;border:none;color:#fff;font-weight:700;cursor:pointer;font-size:.9rem">Se connecter</button>'
+    +'<div id="maint-err" style="color:#ef4444;font-size:.78rem;margin-top:.4rem"></div>'
+    +'</div>'
     +'</div>';
+}
+
+function maintLogin() {
+  var email = (document.getElementById("maint-email").value||"").trim().toLowerCase();
+  var pwd = document.getElementById("maint-pwd").value;
+  var err = document.getElementById("maint-err");
+  db.ref("data/users").once("value").then(function(snap) {
+    var usersObj = snap.val() || {};
+    var users = Object.values(usersObj);
+    var user = users.find(function(u) { return u.email === email && u.pwd === pwd && (u.role === "superadmin" || u.role === "admin"); });
+    if (!user) {
+      if (err) err.textContent = "Identifiants invalides ou droits insuffisants.";
+      return;
+    }
+    // Connecté en admin → désactiver maintenance et recharger
+    db.ref("data/ba_cfg").once("value").then(function(cfgSnap) {
+      var cfg = cfgSnap.val() || {};
+      cfg.maintenance = false;
+      db.ref("data/ba_cfg").set(cfg).then(function() {
+        window.location.reload();
+      });
+    });
+  }).catch(function() {
+    if (err) err.textContent = "Erreur de connexion.";
+  });
 }
 
 // VAPID key from Firebase Console > Project Settings > Cloud Messaging > Web Push certificates
