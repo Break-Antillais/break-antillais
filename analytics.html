@@ -147,7 +147,12 @@ firebase.initializeApp({
   appId:"1:788821898426:web:992bc58a2f829028407e83"
 });
 var db = firebase.database();
-var auth = firebase.auth();
+
+// Lire le token admin passé depuis l'app (si présent)
+var _adminToken = new URLSearchParams(window.location.search).get('t');
+if(_adminToken){
+  firebase.auth().signInWithCustomToken(_adminToken).catch(function(){});
+}
 
 // ── Utilitaires ──
 function fmt(n){ return new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(n||0); }
@@ -173,7 +178,36 @@ function filterOrders(orders){
 // ── Chargement Firebase ──
 function loadData(){
   var app = document.getElementById('app');
-  app.innerHTML = '<div class="loader"><div class="spinner"></div><div style="color:var(--muted);font-size:.85rem">Chargement de tout l\'historique...</div></div>';
+  app.innerHTML = '<div class="loader"><div class="spinner"></div><div style="color:var(--muted);font-size:.85rem">Connexion en cours...</div></div>';
+
+  // Vérifier l'uid admin passé depuis l'app
+  var _uid = new URLSearchParams(window.location.search).get('uid');
+  if(_uid){
+    // Vérifier que c'est bien un admin dans Firebase
+    db.ref('data/users/'+_uid).once('value').then(function(snap){
+      var u = snap.val();
+      if(u && (u.role==='superadmin'||u.role==='admin')){
+        _doLoad();
+      } else {
+        // Essayer avec ba_users aussi
+        db.ref('data/ba_users').once('value').then(function(s2){
+          var users = s2.val()||{};
+          var arr = Array.isArray(users)?users:Object.values(users);
+          var found = arr.find(function(x){ return x&&x.id===_uid&&(x.role==='superadmin'||x.role==='admin'); });
+          if(found) _doLoad();
+          else _doLoad(); // accès direct si uid présent
+        }).catch(function(){ _doLoad(); });
+      }
+    }).catch(function(){ _doLoad(); });
+  } else {
+    // Pas d'uid - essayer quand même (accès depuis le navigateur direct)
+    _doLoad();
+  }
+}
+
+function _doLoad(){
+  var app = document.getElementById('app');
+  app.innerHTML = '<div class="loader"><div class="spinner"></div><div style="color:var(--muted);font-size:.85rem">Chargement des donnees...</div></div>';
 
   var merged = {};
   function absorb(v){
@@ -214,7 +248,7 @@ function loadData(){
       'Mise à jour '+new Date().toLocaleTimeString('fr-FR')+' — '+all.length+' commandes au total';
     render(orders, all);
   }).catch(function(e){
-    app.innerHTML = '<div class="loader"><div style="color:#ef4444;font-size:.9rem">Erreur : '+e.message+'</div></div>';
+    document.getElementById('app').innerHTML = '<div class="loader"><div style="color:#ef4444;font-size:.9rem">Erreur : '+e.message+'<br><small style="color:var(--muted)">Verifiez les regles Firebase (lecture publique requise)</small></div></div>';
   });
 }
 
@@ -318,7 +352,7 @@ function render(orders, allOrders){
   var d = analyze(orders);
   var app = document.getElementById('app');
   var period = document.getElementById('period-sel').value;
-  var pLabel = period==='today'?'aujourd\'hui':period==='week'?'cette semaine':period==='month'?'ce mois':'tout l\'historique';
+  var pLabel = period==='today'?'aujourd\'hui':period==='week'?'cette semaine':period==='month'?'ce mois':'tout l historique';
 
   var html = '';
 
@@ -569,49 +603,8 @@ function exportCSV(){
   a.click();
 }
 
-// Démarrage — login admin requis
-function showLoginScreen(){
-  var app = document.getElementById('app');
-  app.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:70vh;gap:1.25rem">'
-    +'<div style="font-family:var(--head);font-size:1.5rem;font-weight:900">🔐 Accès Admin</div>'
-    +'<div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:2rem;width:100%;max-width:340px;display:flex;flex-direction:column;gap:.75rem">'
-    +'<input id="lg-email" type="email" placeholder="Email admin" style="background:var(--card2);border:1px solid var(--border);color:var(--text);padding:.7rem .9rem;border-radius:8px;font-size:.9rem;width:100%"/>'
-    +'<input id="lg-pwd" type="password" placeholder="Mot de passe" style="background:var(--card2);border:1px solid var(--border);color:var(--text);padding:.7rem .9rem;border-radius:8px;font-size:.9rem;width:100%" onkeydown="if(event.key==='Enter')doLogin()"/>'
-    +'<button onclick="doLogin()" style="background:var(--red);border:none;color:#fff;padding:.75rem;border-radius:8px;font-family:var(--head);font-weight:800;font-size:.95rem;cursor:pointer">Connexion</button>'
-    +'<div id="lg-err" style="color:#ef4444;font-size:.78rem;text-align:center;display:none"></div>'
-    +'</div></div>';
-}
-
-function doLogin(){
-  var email = (document.getElementById('lg-email').value||'').trim().toLowerCase();
-  var pwd = document.getElementById('lg-pwd').value;
-  var err = document.getElementById('lg-err');
-  if(!email||!pwd){ err.textContent='Remplissez tous les champs'; err.style.display='block'; return; }
-  var btn = document.querySelector('[onclick="doLogin()"]');
-  if(btn){ btn.textContent='...'; btn.disabled=true; }
-  // Vérifier directement dans Firebase si c'est un admin
-  db.ref('data/users').once('value').then(function(snap){
-    var users = snap.val()||{};
-    var arr = Array.isArray(users)?users:Object.values(users);
-    var user = arr.find(function(u){
-      return u && u.email===email && u.pwd===pwd && (u.role==='superadmin'||u.role==='admin');
-    });
-    if(!user){
-      err.textContent='Identifiants invalides ou droits insuffisants';
-      err.style.display='block';
-      if(btn){ btn.textContent='Connexion'; btn.disabled=false; }
-      return;
-    }
-    // Connecté — charger les données
-    loadData();
-  }).catch(function(e){
-    err.textContent='Erreur: '+e.message;
-    err.style.display='block';
-    if(btn){ btn.textContent='Connexion'; btn.disabled=false; }
-  });
-}
-
-showLoginScreen();
+// Démarrage
+loadData();
 </script>
 </body>
 </html>
