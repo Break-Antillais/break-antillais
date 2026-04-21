@@ -776,11 +776,13 @@ function startFirebaseListeners() {
       if (arr.length > 0) try { localStorage.setItem('_ba_ba_users', JSON.stringify(arr)); } catch(e) {}
     });
   };
-  db.ref('data/users').on('value', function(){ mergeUsers(); });
-  db.ref('data/ba_users').on('value', function(){ mergeUsers(); });
+  // Lecture unique au démarrage (économie bande passante)
+  db.ref('data/users').once('value').then(function(){ mergeUsers(); });
+  db.ref('data/ba_users').once('value').then(function(){ mergeUsers(); });
 
   // Sync produits en temps réel (stock agoulou etc.)
-  db.ref('data/ba_products').on('value', function(snap){
+  // Produits : lecture unique (stock mis à jour manuellement)
+  db.ref('data/ba_products').once('value').then(function(snap){
     var v = snap.val();
     if (v === null) return;
     var arr = Array.isArray(v) ? v : Object.values(v).filter(function(x){ return x && x.id; });
@@ -788,7 +790,7 @@ function startFirebaseListeners() {
     // Rafraîchir l'affichage produits
     if (typeof renderHome === 'function' && document.getElementById('home-body')) renderHome();
     if (currentScreen === 'home') renderHome();
-  });
+  }).catch(function(e){ console.warn('products load:', e); });
 
   // Listen for real-time status updates
   if (user && !isAdmin) {
@@ -2953,21 +2955,7 @@ function renderOrders(){
   }
   // Écouter les changements en temps réel sur les commandes actives
   active.forEach(function(o){
-    db.ref('data/ba_orders/'+o.id).on('value', function(snap){
-      var updated = snap.val();
-      if (!updated) return;
-      // Mettre à jour localStorage
-      var ords = getOrders();
-      var idx2 = ords.findIndex(function(x){ return x && x.id === updated.id; });
-      if (idx2 >= 0) ords[idx2] = updated; else ords.push(updated);
-      try { localStorage.setItem('_ba_ba_orders', JSON.stringify(ords)); } catch(e) {}
-      // Rafraîchir uniquement si on est sur l'écran commandes
-      if (currentScreen === 'orders') {
-        console.log('[BA] Mise à jour temps réel commande N°'+updated.orderNumber+' statut:', updated.status);
-        renderOrders();
-      }
-    });
-  });
+
   // Historique complet des points
   var ptsHist = load('ba_pts_history_'+user.id, []);
   if (ptsHist.length > 0) {
@@ -3508,7 +3496,7 @@ function renderAdmin(role){
     +'<button class="admin-tab" onclick="adminTab(&apos;invoices&apos;,this)">🧾 Factures</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;marketcodes&apos;,this)">🏪 Marche</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;promocodes&apos;,this)">🎟 Promos</button>'
-    +'<button class="admin-tab" style="background:rgba(212,175,55,.12);color:#D4AF37;border:1px solid rgba(212,175,55,.25)" onclick="openAnalytics()">📊 Analytics</button>';
+;
   var roleLabel=isPrep?'Preparateur':isSup?'Super Admin':'Entreprise';
   return '<div class="header">'
     +'<div class="logo"><span class="logo-break">Break</span><span class="logo-antillais">Antillais</span></div>'
@@ -3680,10 +3668,6 @@ function snapshotAll() {
     };
     db.ref('data/snapshot/latest').set(snap).catch(function(e){ console.warn('snapshot:', e); });
 
-    // Snapshot daté (gardé 7 jours) — clé = date du jour
-    var dateKey = new Date().toISOString().split('T')[0];
-    db.ref('data/snapshot/'+dateKey).set(snap).catch(function(e){});
-
     console.log('[BA] Snapshot sauvegardé', new Date().toLocaleTimeString('fr-FR'));
   } catch(e) { console.warn('snapshotAll error:', e); }
 }
@@ -3730,7 +3714,7 @@ function startSnapshotTimer() {
   setTimeout(function(){
     snapshotAll();
     // Puis toutes les 5 minutes
-    setInterval(snapshotAll, 5 * 60 * 1000);
+    setInterval(snapshotAll, 30 * 60 * 1000); // toutes les 30min
   }, 30000);
   // Démarrer le polling présence admin
   startPresencePolling();
@@ -7693,6 +7677,14 @@ function startCountdown() {
     }
     var _initCfg = getCfg();
     if (_initCfg.supplementPrice) SUPPLEMENT_PRICE = _initCfg.supplementPrice;
+    // Nettoyage automatique des clés playoffs obsolètes
+    if (_initCfg.playoffsActive !== undefined || _initCfg.playoffsImgUrl !== undefined) {
+      db.ref('data/ba_cfg/playoffsActive').remove();
+      db.ref('data/ba_cfg/playoffsImgUrl').remove();
+      delete _initCfg.playoffsActive;
+      delete _initCfg.playoffsImgUrl;
+      console.log('[BA] Clés playoffs supprimées de Firebase');
+    }
     SAUCES = getSauces();
     if (_initCfg.maintenance) {
       // Laisser l'app se charger normalement
