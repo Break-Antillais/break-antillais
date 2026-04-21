@@ -593,23 +593,6 @@ function loadFromFirebase(cb) {
           val = Object.values(val).filter(function(v){ return v && typeof v === 'object'; });
         }
       }
-      // Pour ba_orders : fusionner avec ba_safe pour ne jamais perdre de commandes
-      if (k === 'ba_safe' && val && typeof val === 'object') {
-        // ba_safe est l'archive permanente - fusionner dans ba_orders
-        var safeArr = Array.isArray(val) ? val : Object.values(val).filter(function(x){ return x && x.id; });
-        try {
-          var existing = JSON.parse(localStorage.getItem('_ba_ba_orders')||'[]');
-          if (!Array.isArray(existing)) existing = [];
-          safeArr.forEach(function(o){
-            if (!o || !o.id) return;
-            var i = existing.findIndex(function(x){ return x && x.id === o.id; });
-            if (i < 0) existing.push(o); // ajouter les commandes manquantes
-            else if (existing[i].status !== o.status) existing[i] = o; // mettre à jour si statut différent
-          });
-          localStorage.setItem('_ba_ba_orders', JSON.stringify(existing));
-        } catch(e) {}
-        return;
-      }
       // Pour ba_orders : Firebase est la source de vérité
       // Fusionner uniquement si localStorage a des commandes récentes non encore dans Firebase
       if (k === 'ba_orders' && Array.isArray(val)) {
@@ -897,14 +880,9 @@ var DEFAULT_MEATS = [
   {name:'Thon',      price:6.50, ok:true}
 ];
 var SUPPLEMENT_PRICE = 0.50;
-function getMeats(cat) {
+function getMeats() {
   var m = load('ba_meats', DEFAULT_MEATS).slice();
-  m = m.sort(function(a,b){ return a.name.localeCompare(b.name,'fr'); });
-  // Morue : uniquement Bokit Classique et Menu Enfant Bokit
-  if (cat && cat !== 'classique' && cat !== 'enfant_bokit') {
-    m = m.filter(function(x){ return x.name.toLowerCase().indexOf('morue') < 0; });
-  }
-  return m;
+  return m.sort(function(a,b){ return a.name.localeCompare(b.name,'fr'); });
 }
 function getAvailableMeats() {
   return getMeats().filter(function(m){ return m.ok; });
@@ -1096,15 +1074,12 @@ function saveOrder(order) {
   try { localStorage.setItem('_ba_ba_orders', JSON.stringify(orders)); } catch(e) {}
   // 1. Nœud principal de l'app
   db.ref('data/ba_orders/'+order.id).set(order).catch(function(e){ console.warn('FB saveOrder:',e); });
-  // 2. Archive permanente — JAMAIS effacée, source de vérité absolue
+  // 2. Sauvegarde sécurisée — nœud séparé jamais touché par les listeners
   var archiveData = Object.assign({}, order, {_savedAt: new Date().toISOString()});
   db.ref('data/ba_safe/'+order.id).set(archiveData).catch(function(e){ console.warn('safe write:', e); });
   // 3. Journal par date — pour retrouver les commandes d'un jour précis
   var dateKey = (order.pickupDate || new Date().toISOString().split('T')[0]);
   db.ref('data/ba_journal/'+dateKey+'/'+order.id).set(archiveData).catch(function(e){});
-  // 4. Archive mensuelle — groupée par mois pour consultation comptable
-  var monthKey = dateKey.substring(0,7); // YYYY-MM
-  db.ref('data/ba_archive/'+monthKey+'/'+order.id).set(archiveData).catch(function(e){});
   try { localStorage.setItem('_ba_ba_last_save', JSON.stringify(new Date().toISOString())); } catch(e) {}
   // Déclencher snapshot différé (sans bloquer)
   setTimeout(function(){ if (typeof snapshotAll === 'function') snapshotAll(); }, 3000);
@@ -2052,7 +2027,6 @@ function continueOpenProduct(id) {
     +'</div>'
     +modalVisualHtml
     +'<h2 class="modal-title text-center">'+p.name+'</h2>'
-    
     +(function(){
       // Badge stock faible
       var stockVal = null;
@@ -2074,7 +2048,7 @@ function continueOpenProduct(id) {
     html += buildBoxConfigurator(p);
   } else if (p.isClassique) {
     // Bokit Classique - choose meat, price updates
-    var allMeats = getMeats('classique');
+    var allMeats = getMeats();
     html += '<div class="form-group"><label class="form-label">🥩 Choisissez votre viande</label>'
       +'<p class="text-sm text-muted mb-1">Le prix s&apos;adapte selon votre choix</p>'
       +'<div class="chips" id="meat-chips">';
@@ -2097,7 +2071,7 @@ function continueOpenProduct(id) {
     html += '<div class="form-group"><label class="form-label">➕ Supplement viande <span style="color:var(--gold)">+'+fmt(SUPPLEMENT_PRICE)+'/piece</span></label>'
       +'<div class="chips" id="supp-chips">';
     var allMeatsMapC = {};
-    getMeats('supplement').forEach(function(m){ allMeatsMapC[m.name] = m.ok; });
+    getMeats().forEach(function(m){ allMeatsMapC[m.name] = m.ok; });
     getSupplements().forEach(function(s){
       var unavail = allMeatsMapC[s] === false;
       html += '<button class="chip" data-v="'+s+'"'
@@ -2110,9 +2084,7 @@ function continueOpenProduct(id) {
   } else if (needsConfig) {
     if (mc>0) {
       html += '<div class="form-group"><label class="form-label">🥩 '+(mc>1?mc+' viandes':'Viande')+' au choix</label><div class="chips" id="meat-chips">';
-      // Pour Menu Enfant Bokit → Morue autorisée, sinon non
-      var _meatCat = (p.cat==='enfant' && p.name.toLowerCase().indexOf('bokit')>=0) ? 'enfant_bokit' : p.cat;
-      getMeats(_meatCat).forEach(function(m){
+      getMeats().forEach(function(m){
         var unavail = !m.ok;
         html += '<button class="chip" data-v="'+m.name+'"'
           +(unavail?' disabled style="opacity:.4;cursor:not-allowed;pointer-events:none"':' onclick="toggleMeat(this,'+mc+')"')+'>'
@@ -2124,7 +2096,7 @@ function continueOpenProduct(id) {
     html += '<div class="form-group"><label class="form-label">➕ Supplement viande <span style="color:var(--gold)">+'+fmt(SUPPLEMENT_PRICE)+'/piece</span></label>'
       +'<div class="chips" id="supp-chips">';
     var allMeatsMap = {};
-    getMeats('supplement').forEach(function(m){ allMeatsMap[m.name] = m.ok; });
+    getMeats().forEach(function(m){ allMeatsMap[m.name] = m.ok; });
     getSupplements().forEach(function(s){
       var unavail = allMeatsMap[s] === false;
       html += '<button class="chip" data-v="'+s+'"'
@@ -2397,7 +2369,6 @@ function addToCart() {
   for (var qi = 0; qi < qtyToAdd; qi++) {
     cart.push({id:genId(),pid:pendingProd.id,name:cartName,price:finalPrice,cat:pendingProd.cat,details:details.join(' | '),qty:1});
   }
-  
   closeModal('m-product'); updateBadges();
   setTimeout(function(){
     var b = document.querySelector('#nav-cart .nav-badge');
@@ -3507,8 +3478,7 @@ function renderAdmin(role){
     +'<button class="admin-tab" onclick="adminTab(&apos;config&apos;,this)">⚙️ Config</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;invoices&apos;,this)">🧾 Factures</button>'
     +'<button class="admin-tab" onclick="adminTab(&apos;marketcodes&apos;,this)">🏪 Marche</button>'
-    +'<button class="admin-tab" onclick="adminTab(&apos;promocodes&apos;,this)">🎟 Promos</button>'
-    +'<button class="admin-tab" style="background:rgba(212,175,55,.12);color:#D4AF37;border:1px solid rgba(212,175,55,.25)" onclick="openAnalytics()">📊 Analytics</button>';
+    +'<button class="admin-tab" onclick="adminTab(&apos;promocodes&apos;,this)">🎟 Promos</button>';
   var roleLabel=isPrep?'Preparateur':isSup?'Super Admin':'Entreprise';
   return '<div class="header">'
     +'<div class="logo"><span class="logo-break">Break</span><span class="logo-antillais">Antillais</span></div>'
@@ -3519,13 +3489,6 @@ function renderAdmin(role){
     +'<div class="admin-tabs">'+tabs+'</div>'
     +'<div id="admin-content">'+adminOrders()+'</div></div>';
 }
-function openAnalytics() {
-  var user = getCurrentUser();
-  var uid = user ? user.id : "";
-  var url = "https://break-antillais.github.io/break-antillais/analytics.html?uid="+encodeURIComponent(uid);
-  window.open(url, "_blank");
-}
-
 function adminTab(tab, btn){
   document.querySelectorAll('.admin-tab').forEach(function(b){b.classList.remove('active');});
   btn.classList.add('active');
@@ -3565,54 +3528,6 @@ function sendMsgToCreneau() {
 }
 
 // ══ RÉCUPÉRATION D'URGENCE DES COMMANDES ══
-function showOrderArchive() {
-  var m = document.getElementById('m-product');
-  m.innerHTML = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(&apos;m-product&apos;)">'
-    + '<div class="modal" style="max-height:92vh;overflow-y:auto"><div class="modal-handle"></div>'
-    + '<h2 class="modal-title">📚 Archives commandes</h2>'
-    + '<div id="archive-content"><div class="text-sm text-muted">Chargement...</div></div>'
-    + '<button class="btn btn-secondary btn-full mt-2" onclick="closeModal(&apos;m-product&apos;)">Fermer</button>'
-    + '</div></div>';
-  m.style.display = 'block';
-
-  // Charger la liste des mois depuis ba_archive
-  db.ref('data/ba_archive').once('value').then(function(snap) {
-    var v = snap.val();
-    var el = document.getElementById('archive-content');
-    if (!el) return;
-    if (!v) { el.innerHTML = '<p class="text-sm text-muted">Aucune archive disponible.</p>'; return; }
-    var months = Object.keys(v).sort().reverse();
-    var html = '';
-    months.forEach(function(month) {
-      var orders = Object.values(v[month]).filter(function(o){ return o && o.id; });
-      var total = orders.reduce(function(s,o){ return s+(o.total||0); }, 0);
-      var statuts = {picked_up:'Récupérée',cancelled:'Annulée',confirmed:'Confirmée',preparing:'En prép.',ready:'Prête',pending:'En attente'};
-      html += '<div style="background:var(--dark3);border-radius:10px;padding:.75rem;margin-bottom:.5rem">'
-        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">'
-        + '<div class="fw-700" style="font-size:1rem">' + month + '</div>'
-        + '<div style="text-align:right"><div class="text-gold fw-700">' + fmt(total) + '</div>'
-        + '<div class="text-sm text-muted">' + orders.length + ' commandes</div></div>'
-        + '</div>'
-        + '<div style="max-height:300px;overflow-y:auto">';
-      orders.sort(function(a,b){ return new Date(b.createdAt)-new Date(a.createdAt); }).forEach(function(o) {
-        var statColor = o.status==='picked_up'?'#10b981':o.status==='cancelled'?'#ef4444':'#f59e0b';
-        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:.78rem">'
-          + '<div><span class="fw-700">N°' + o.orderNumber + '</span> · ' + (o.userPrenom||'?') + '</div>'
-          + '<div style="display:flex;gap:.5rem;align-items:center">'
-          + '<span>' + (o.pickupDate||'') + '</span>'
-          + '<span class="text-gold fw-700">' + fmt(o.total||0) + '</span>'
-          + '<span style="color:' + statColor + '">' + (statuts[o.status]||o.status) + '</span>'
-          + '</div></div>';
-      });
-      html += '</div></div>';
-    });
-    el.innerHTML = html;
-  }).catch(function(e) {
-    var el = document.getElementById('archive-content');
-    if (el) el.innerHTML = '<p class="text-sm" style="color:#ef4444">Erreur: ' + e.message + '</p>';
-  });
-}
-
 function recoverOrdersFromBackup() {
   toast('Récupération en cours...', 'info', 2000);
   // Lire depuis archive (source la plus fiable)
@@ -4333,10 +4248,7 @@ function shareManualMsg(btn) {
 function adminOrders(){
   var html_top='<div style="padding:.5rem .9rem .75rem">';
   html_top+='<button class="btn btn-primary btn-full" onclick="openManualOrder()">📝 Saisir une commande client</button>';
-  html_top+='<div style="display:flex;gap:.4rem;margin-top:.4rem">';
-  html_top+='<button class="btn btn-sm" style="flex:1;background:rgba(212,175,55,.1);border:1px solid #D4AF37;color:#D4AF37" onclick="showOrderArchive()">📚 Archives</button>';
-  html_top+='<button class="btn btn-sm" style="flex:1;background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#ef4444" onclick="restoreFromSnapshot()">🔄 Restaurer</button>';
-  html_top+='</div>';
+  html_top+='<button class="btn btn-sm btn-full" style="margin-top:.4rem;background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#ef4444" onclick="restoreFromSnapshot()">🔄 Restaurer depuis snapshot</button>';
 
   html_top+='<div style="margin-top:.5rem"><div class="text-sm text-muted" style="margin-bottom:.35rem">⏰ Créneaux ce soir — appuyez pour bloquer/débloquer :</div>';
   html_top+='<div style="display:flex;flex-wrap:wrap;gap:.35rem">'+buildSlotToggles()+'</div></div>';
@@ -4709,7 +4621,6 @@ function advanceOrder(id) {
       } else {
         // Marquer IMMÉDIATEMENT avant tout appel async pour éviter le doublon
         o.pointsAwarded = true;
-
 
         var cfg = getCfg();
         var ptsPerEuro = cfg.ptsPerEuro || 5;
@@ -5422,31 +5333,6 @@ function mcSearchPhone(val) {
 
 
 // ── Scanner QR Code (caméra) ──
-
-function mcSelectClientObj(user) {
-  document.getElementById('mc-user').value = user.id;
-  var sel = document.getElementById('mc-selected');
-  if (sel) {
-    var p = getPalier(user.points || 0);
-    sel.innerHTML = '✅ <strong>' + user.prenom + '</strong>'
-      + (user.phone ? ' · ' + user.phone : '')
-      + ' · <span style="color:var(--gold)">' + (user.points||0) + ' pts</span>'
-      + ' · <span style="color:' + p.color + '">' + p.icon + ' ' + p.name + '</span>';
-    sel.style.display = 'block';
-  }
-  var srEl = document.getElementById('mc-phone-search');
-  var resEl = document.getElementById('mc-phone-results');
-  if (srEl) srEl.value = '';
-  if (resEl) resEl.innerHTML = '';
-  var btn = document.getElementById('mc-action-btn');
-  if (btn) btn.textContent = 'Créditer les points directement';
-}
-
-function mcUnselectClient() {
-  document.getElementById('mc-user').value = '';
-  var sel = document.getElementById('mc-selected');
-  if (sel) sel.style.display = 'none';
-}
 
 function mcSelectClient(uid) {
   var u = getUsers().find(function(x){ return x.id===uid; });
