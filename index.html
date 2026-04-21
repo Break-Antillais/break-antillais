@@ -2953,9 +2953,6 @@ function renderOrders(){
   if(orders.length===0){
     html+='<div class="empty-state" style="padding:2.5rem 0"><div class="icon">📭</div><div class="title">Aucune commande</div><p class="text-sm">Passez votre premiere commande !</p></div>';
   }
-  // Écouter les changements en temps réel sur les commandes actives
-  active.forEach(function(o){
-
   // Historique complet des points
   var ptsHist = load('ba_pts_history_'+user.id, []);
   if (ptsHist.length > 0) {
