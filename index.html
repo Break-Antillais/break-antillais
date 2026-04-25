@@ -7248,60 +7248,118 @@ function showOrderReadyAlert(order) {
 
 // ANNIVERSAIRE AUTO
 function checkBirthdayOffer(user) {
-  if (!user || !user.bday) return;
+  if (!user || !user.id || !user.bday) return;
   var today = new Date();
   var bday = new Date(user.bday);
+  // Vérifier que c'est bien l'anniversaire aujourd'hui
   if (bday.getDate() !== today.getDate() || bday.getMonth() !== today.getMonth()) return;
-  // Vérifier si déjà offert cette année (Firebase)
+
   var thisYear = today.getFullYear();
+
+  // Vérifier dans Firebase si déjà offert cette année (anti-doublon fiable)
   db.ref('data/ba_bday_'+user.id).once('value').then(function(snap) {
-    if (snap.val() === thisYear) return; // déjà fait
-    // Marquer comme fait
-    db.ref('data/ba_bday_'+user.id).set(thisYear);
-    save('ba_bday_'+user.id, thisYear);
+    if (snap.val() === thisYear) return; // déjà attribué cette année
+
     var cfg = getCfg();
     var bdayPts = cfg.birthdayPts || 50;
-    // Ajouter les points
-    user.points = (user.points||0) + bdayPts;
-    db.ref('data/users/'+user.id+'/points').set(user.points);
-    saveUser(user);
-    setCurrentUser(user);
-    // Historique points Firebase
+    var newTotal = (user.points||0) + bdayPts;
     var histEntry = {pts: bdayPts, label: 'Cadeau anniversaire 🎂', at: new Date().toISOString()};
-    db.ref('data/ba_pts_history_'+user.id).once('value').then(function(hs) {
-      var arr = hs.val() || [];
-      if (!Array.isArray(arr)) arr = Object.values(arr);
-      arr.unshift(histEntry);
-      db.ref('data/ba_pts_history_'+user.id).set(arr.slice(0, 50));
+
+    // ── Marquer IMMÉDIATEMENT (anti-doublon) ──
+    db.ref('data/ba_bday_'+user.id).set(thisYear);
+    save('ba_bday_'+user.id, thisYear);
+
+    // ── Écriture atomique des points ──
+    var updates = {};
+    updates['data/users/'+user.id+'/points'] = newTotal;
+    db.ref().update(updates).then(function(){
+
+      // ── Mettre à jour ba_users aussi ──
+      db.ref('data/ba_users').once('value').then(function(buSnap){
+        var arr = buSnap.val() || [];
+        if (!Array.isArray(arr)) arr = Object.values(arr);
+        var i = arr.findIndex(function(x){ return x && x.id === user.id; });
+        if (i >= 0) {
+          arr[i].points = newTotal;
+          db.ref('data/ba_users').set(arr);
+        }
+      });
+
+      // ── Historique points ──
+      db.ref('data/ba_pts_history_'+user.id).once('value').then(function(hs){
+        var arr2 = hs.val() || [];
+        if (!Array.isArray(arr2)) arr2 = Object.values(arr2);
+        arr2.unshift(histEntry);
+        db.ref('data/ba_pts_history_'+user.id).set(arr2.slice(0, 50));
+      });
+
+      // ── Mettre à jour le cache local ──
+      user.points = newTotal;
+      saveUser(user);
+      setCurrentUser(user);
+
+      // ── Notification in-app ──
+      notify(user.id, '🎂 Joyeux anniversaire '+user.prenom+' !',
+        '+'+bdayPts+' points offerts ! Total : '+newTotal+' pts 🎉');
+
+      // ── Notification status_updates (visible dans l'app) ──
+      db.ref('status_updates/'+user.id+'/bday-'+thisYear).set({
+        status: 'bday_gift',
+        title: '🎂 Joyeux anniversaire '+user.prenom+' !',
+        body: 'Break Antillais vous offre +'+bdayPts+' points fidélité aujourd\'hui !',
+        pts: bdayPts,
+        at: new Date().toISOString()
+      });
+
+      // ── Email ──
+      try {
+        if (user.email && typeof emailjs !== 'undefined') {
+          emailjs.send('service_uez8gro', 'template_gs8itxh', {
+            email: user.email,
+            client_name: user.prenom,
+            order_number: 'ANNIV-'+thisYear,
+            items: 'Cadeau anniversaire Break Antillais 🎂',
+            total: '+'+bdayPts+' points offerts',
+            pickup_date: today.toLocaleDateString('fr-FR'),
+            pickup_time: '',
+            payment: 'Cadeau fidélité',
+            address: getCfg().address || ''
+          }).catch(function(e){ console.warn('Bday email:', e); });
+        }
+      } catch(e) {}
+
+      // ── Toast + modale de félicitation ──
+      setTimeout(function(){
+        updateBadges();
+        showBirthdayModal(user.prenom, bdayPts, newTotal);
+      }, 800);
+
+    }).catch(function(e){
+      console.warn('[Bday] Erreur écriture points:', e);
+      // Annuler le marquage si l'écriture a échoué
+      db.ref('data/ba_bday_'+user.id).remove();
     });
-    // Notification in-app
-    notify(user.id, '🎂 Joyeux anniversaire '+user.prenom+' !', '+'+bdayPts+' points offerts pour votre anniversaire !');
-    // Email
-    try {
-      if (user.email && typeof emailjs !== 'undefined') {
-        emailjs.send('service_uez8gro', 'template_gs8itxh', {
-          email: user.email,
-          client_name: user.prenom,
-          order_number: 'ANNIV-'+thisYear,
-          items: 'Cadeau anniversaire Break Antillais 🎂',
-          total: '+'+bdayPts+' points offerts',
-          pickup_date: today.toLocaleDateString('fr-FR'),
-          pickup_time: '',
-          payment: 'Cadeau',
-          address: getCfg().address || ''
-        }).catch(function(e){ console.warn('Bday email:', e); });
-      }
-    } catch(e) {}
-    // SMS WhatsApp
-    var smsMsg = '🎂 Joyeux anniversaire '+user.prenom+' ! Break Antillais vous offre +'+bdayPts+' points fidélité aujourd\'hui. Bonne journée !';
-    if (user.phone) {
-      db.ref('data/ba_bday_sms_'+user.id).set({msg: smsMsg, phone: user.phone, at: new Date().toISOString()});
-    }
-    setTimeout(function(){
-      toast('🎂 Joyeux anniversaire '+user.prenom+' ! +'+bdayPts+' points offerts !', 'success', 6000);
-      updateBadges();
-    }, 1000);
-  }).catch(function(e){ console.warn('Birthday check:', e); });
+
+  }).catch(function(e){ console.warn('[Bday] Erreur vérification:', e); });
+}
+
+function showBirthdayModal(prenom, pts, total) {
+  var m = document.getElementById('m-product');
+  if (!m) { toast('🎂 Joyeux anniversaire '+prenom+' ! +'+pts+' points !','success',6000); return; }
+  m.innerHTML = '<div class="modal-overlay">'
+    +'<div class="modal" style="text-align:center;max-width:340px">'
+    +'<div class="modal-handle"></div>'
+    +'<div style="font-size:3.5rem;margin-bottom:.25rem">🎂</div>'
+    +'<h2 class="modal-title" style="font-size:1.3rem">Joyeux anniversaire<br>'+prenom+' !</h2>'
+    +'<p style="font-size:.85rem;color:var(--muted);margin:.5rem 0 1rem">Break Antillais vous souhaite un excellent anniversaire 🎉</p>'
+    +'<div style="background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(200,35,43,.1));border:1.5px solid rgba(212,175,55,.4);border-radius:14px;padding:1.25rem;margin-bottom:1.25rem">'
+    +'<div style="font-family:var(--head);font-size:2.8rem;font-weight:900;color:#D4AF37;line-height:1">+'+pts+'</div>'
+    +'<div style="font-size:.85rem;color:var(--muted);margin-top:.2rem">points fidélité offerts</div>'
+    +'<div style="font-size:.78rem;font-weight:700;color:var(--gold);margin-top:.4rem">Nouveau total : '+total+' pts</div>'
+    +'</div>'
+    +'<button class="btn btn-primary btn-full" onclick="closeModal(&apos;m-product&apos;);renderProfile()">Voir mes points 🎁</button>'
+    +'</div></div>';
+  m.style.display = 'block';
 }
 
 // SHOW REFERRAL CODE IN PROFILE
