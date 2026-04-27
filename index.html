@@ -2,6 +2,9 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <meta name="theme-color" content="#0a0a0a"/>
 <link rel="icon" type="image/png" href="app-icon.png"/>
@@ -466,6 +469,27 @@ body > *:not(#loading):not(#app-bg):not(nav):not(#m-product):not(#m-auth):not(.t
 <script>
 
 'use strict';
+var APP_VERSION = '202604272128';
+// Vérifier si une nouvelle version est disponible
+function checkAppUpdate() {
+  try {
+    var stored = localStorage.getItem('_ba_app_version');
+    if (stored && stored !== APP_VERSION) {
+      localStorage.setItem('_ba_app_version', APP_VERSION);
+      // Vider le cache service worker si possible
+      if ('caches' in window) {
+        caches.keys().then(function(names){
+          names.forEach(function(n){ caches.delete(n); });
+        });
+      }
+      window.location.reload(true);
+    } else {
+      localStorage.setItem('_ba_app_version', APP_VERSION);
+    }
+  } catch(e) {}
+}
+checkAppUpdate();
+
 
 // ══ FIREBASE ══
 var firebaseConfig = {
@@ -988,6 +1012,7 @@ var DEFAULT_CFG = {
   cgv:'CGV Break Antillais\nCommandes acceptees jusqu a 17h.\nRetrait 19h-22h.',
   rgpd:'Vos donnees sont utilisees uniquement pour la gestion des commandes.',
   offreActive:false,
+  offreDebut:'',
   offreNom:'',
   offreDesc:'',
   offrePrix:0,
@@ -6688,8 +6713,12 @@ function adminConfig(){
     +'<div class="form-group"><label class="form-label">URL de l\'affiche (depuis GitHub ou imgbb)</label>'
     +'<input class="form-input" id="off-img" placeholder="https://..." value="'+(cfg.offreImgUrl||'')+'"/>'
     +'<div class="text-sm text-muted" style="margin-top:.3rem">Upload l\'image sur GitHub et colle l\'URL ici</div></div>'
-    +'<div class="form-group"><label class="form-label">Date d\'expiration (vide = permanent)</label>'
+    +'<div style="display:flex;gap:.5rem">'
+    +'<div class="form-group" style="flex:1"><label class="form-label">Date de début</label>'
+    +'<input class="form-input" id="off-debut" type="date" value="'+(cfg.offreDebut||'')+'"/></div>'
+    +'<div class="form-group" style="flex:1"><label class="form-label">Date de fin</label>'
     +'<input class="form-input" id="off-expiry" type="date" value="'+(cfg.offreExpiry||'')+'"/></div>'
+    +'</div>'
     +'<div class="form-group"><label class="form-label">Stock (0 = illimité)</label>'
     +'<input class="form-input" id="off-stock" type="number" min="0" value="'+(cfg.offreStock||0)+'"/></div>'
     +'<label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem;cursor:pointer">'
@@ -7545,7 +7574,11 @@ function showOffrePopup(cfg) {
       content += '<div style="background:linear-gradient(135deg,#1a0505,#0d0000);border:2px solid var(--red);border-radius:14px;padding:2rem 1.5rem;text-align:center">'
         +'<div style="font-size:2rem;margin-bottom:.5rem">🔥</div>'
         +'<div style="font-family:var(--head);font-size:1.4rem;font-weight:900;margin-bottom:.35rem">'+cfg.offreNom+'</div>'
-        +(cfg.offreDesc?'<div style="font-size:.85rem;color:var(--muted);margin-bottom:.75rem">'+cfg.offreDesc+'</div>':'')
+        +(cfg.offreDesc?'<div style="font-size:.85rem;color:var(--muted);margin-bottom:.5rem">'+cfg.offreDesc+'</div>':'')
+        +(cfg.offreDebut||cfg.offreExpiry ? '<div style="font-size:.75rem;color:var(--muted);margin-bottom:.5rem">'
+          +(cfg.offreDebut?'Du '+new Date(cfg.offreDebut).toLocaleDateString("fr-FR",{day:"numeric",month:"long"})+' ':'')
+          +(cfg.offreExpiry?'au '+new Date(cfg.offreExpiry).toLocaleDateString("fr-FR",{day:"numeric",month:"long"}):'')
+          +'</div>' : '')
         +'<div style="font-family:var(--head);font-size:2rem;font-weight:900;color:var(--gold)">'+fmt(prix)+'</div>'
         +'</div>';
     }
@@ -7628,6 +7661,7 @@ function adminSaveOffre() {
   var desc = (document.getElementById('off-desc')||{}).value||'';
   var prix = parseFloat((document.getElementById('off-prix')||{}).value)||0;
   var imgUrl = (document.getElementById('off-img')||{}).value||'';
+  var debut = (document.getElementById('off-debut')||{}).value||'';
   var expiry = (document.getElementById('off-expiry')||{}).value||'';
   var stock = parseInt((document.getElementById('off-stock')||{}).value)||0;
   var active = (document.getElementById('off-active')||{}).checked;
@@ -7641,6 +7675,7 @@ function adminSaveOffre() {
   cfg.offreDesc = desc;
   cfg.offrePrix = prix;
   cfg.offreImgUrl = imgUrl;
+  cfg.offreDebut = debut || '';
   cfg.offreExpiry = expiry || '';
   cfg.offreStock = stock;
   save('ba_cfg', cfg);
