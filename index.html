@@ -8099,9 +8099,9 @@ function startCountdown() {
         ls.style.opacity = '0';
         setTimeout(function(){ ls.style.display='none'; document.body.classList.add('app-ready'); }, 400);
       }
+      lancerPopupTrioBokit();
 
     }, 1500);
-    setTimeout(lancerPopupTrioBokit, 2500);
     startOrderPolling();
     startCountdown();
     startSnapshotTimer(); // Protection données toutes les 5min
