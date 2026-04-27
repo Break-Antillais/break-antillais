@@ -8102,11 +8102,13 @@ function afficherOffreMai() {
   var qte = 1;
   function monter(avecImg) {
     var boite = document.createElement('div');
-    boite.style.cssText = 'max-width:400px;width:100%';
+    boite.style.cssText = 'max-width:420px;width:100%;display:flex;flex-direction:column;max-height:92vh';
     if (avecImg) {
       var img = document.createElement('img');
       img.src = baseUrl;
-      img.style.cssText = 'width:100%;border-radius:14px 14px 0 0;display:block;max-height:50vh;object-fit:cover';
+      img.style.cssText = 'width:100%;border-radius:14px 14px 0 0;display:block;'
+      + 'object-fit:contain;object-position:center;'
+      + 'max-height:calc(92vh - 160px);height:auto;';
       boite.appendChild(img);
     } else {
       var hdr = document.createElement('div');
