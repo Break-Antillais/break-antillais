@@ -8259,6 +8259,18 @@ function startCountdown() {
         ls.style.opacity = '0';
         setTimeout(function(){ ls.style.display='none'; document.body.classList.add('app-ready'); }, 400);
       }
+      // Popup offre spéciale — lire depuis Firebase pour avoir la config à jour
+      setTimeout(function(){
+        db.ref('data/ba_cfg').once('value').then(function(snap){
+          var liveCfg = snap.val();
+          if (!liveCfg) liveCfg = getCfg();
+          if (!liveCfg.offreActive || !liveCfg.offreNom) return;
+          var now_ = new Date();
+          var debutOk = !liveCfg.offreDebut || new Date(liveCfg.offreDebut) <= now_;
+          var finOk = !liveCfg.offreExpiry || new Date(liveCfg.offreExpiry) >= now_;
+          if (debutOk && finOk) showOffrePopup(liveCfg);
+        }).catch(function(){});
+      }, 1200);
     }, 1500);
     startOrderPolling();
     startCountdown();
