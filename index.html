@@ -8247,17 +8247,48 @@ function startCountdown() {
         ls.style.opacity = '0';
         setTimeout(function(){ ls.style.display='none'; document.body.classList.add('app-ready'); }, 400);
       }
-      // Popup offre spéciale — lire depuis Firebase pour avoir la config à jour
+      // Popup offre spéciale
       setTimeout(function(){
+        // Merger Firebase avec DEFAULT_CFG (Firebase peut avoir offreActive=false en cache)
         db.ref('data/ba_cfg').once('value').then(function(snap){
-          var liveCfg = snap.val();
-          if (!liveCfg) liveCfg = getCfg();
-          if (!liveCfg.offreActive || !liveCfg.offreNom) return;
+          var fbCfg = snap.val() || {};
+          // Pour les champs offre : Firebase est prioritaire SAUF si DEFAULT_CFG a offreActive=true et Firebase n'a pas le champ
+          var offreActive = (fbCfg.offreActive !== undefined) ? fbCfg.offreActive : DEFAULT_CFG.offreActive;
+          var offreNom = fbCfg.offreNom || DEFAULT_CFG.offreNom;
+          var offreDebut = fbCfg.offreDebut || DEFAULT_CFG.offreDebut;
+          var offreExpiry = fbCfg.offreExpiry || DEFAULT_CFG.offreExpiry;
+          var offrePrix = fbCfg.offrePrix || DEFAULT_CFG.offrePrix;
+          var offreDesc = fbCfg.offreDesc || DEFAULT_CFG.offreDesc;
+          var offreImgUrl = fbCfg.offreImgUrl || DEFAULT_CFG.offreImgUrl;
+          // Si Firebase n'a pas encore les champs offre, les pousser
+          if (fbCfg.offreNom === undefined) {
+            db.ref('data/ba_cfg').update({
+              offreActive: DEFAULT_CFG.offreActive,
+              offreNom: DEFAULT_CFG.offreNom,
+              offreDesc: DEFAULT_CFG.offreDesc,
+              offrePrix: DEFAULT_CFG.offrePrix,
+              offreImgUrl: DEFAULT_CFG.offreImgUrl,
+              offreDebut: DEFAULT_CFG.offreDebut,
+              offreExpiry: DEFAULT_CFG.offreExpiry
+            });
+            offreActive = DEFAULT_CFG.offreActive;
+          }
+          if (!offreActive || !offreNom) return;
           var now_ = new Date();
-          var debutOk = !liveCfg.offreDebut || new Date(liveCfg.offreDebut) <= now_;
-          var finOk = !liveCfg.offreExpiry || new Date(liveCfg.offreExpiry) >= now_;
-          if (debutOk && finOk) showOffrePopup(liveCfg);
-        }).catch(function(){});
+          var debutOk = !offreDebut || new Date(offreDebut) <= now_;
+          var finOk = !offreExpiry || new Date(offreExpiry) >= now_;
+          if (!debutOk || !finOk) return;
+          var cfg_ = Object.assign({}, fbCfg, {
+            offreActive:offreActive, offreNom:offreNom, offreDesc:offreDesc,
+            offrePrix:offrePrix, offreImgUrl:offreImgUrl,
+            offreDebut:offreDebut, offreExpiry:offreExpiry
+          });
+          showOffrePopup(cfg_);
+        }).catch(function(){
+          // Fallback : utiliser DEFAULT_CFG directement
+          var cfg_ = getCfg();
+          if (cfg_.offreActive && cfg_.offreNom) showOffrePopup(cfg_);
+        });
       }, 1200);
     }, 1500);
     startOrderPolling();
