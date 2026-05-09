@@ -5198,15 +5198,19 @@ function saveEditProd(id){
     Object.assign(p,d);
     if(_newImg) { p.image=_newImg; } else { p.image=oldImage; if(oldImageRef) p._imageRef=oldImageRef; }
     saveProduct(p);
-    // Si c'est un agoulou, propager le stock à toutes les variantes
+    // Fermer immédiatement
+    _newImg = null;
+    closeModal('m-product');
+    toast('Produit modifié !', 'success');
+    document.getElementById('admin-content').innerHTML = adminProducts();
+    // Propagation agoulou en arrière-plan (async)
     if (p.cat === 'agoulou') {
-      // Écriture centralisée dans ba_agoulou_stock
       setAgoulouStock(p.stock, p.ok);
     }
+  } else {
+    _newImg = null;
+    closeModal('m-product');
   }
-  _newImg=null; closeModal('m-product');
-  toast('Produit modifie !','success');
-  document.getElementById('admin-content').innerHTML=adminProducts();
 }
 function deleteProd(id){
   deleteProduct(id);
