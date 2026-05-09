@@ -1233,8 +1233,11 @@ function saveProduct(p) {
     pToSave.image = '__firebase__' + p.id;
     pToSave._imageRef = p.id;
   }
-  // Sync Firebase complet du produit
-  var fbData = Object.assign({}, pToSave);
+  // Sync Firebase complet du produit — nettoyer les undefined
+  var fbData = {};
+  Object.keys(pToSave).forEach(function(k){
+    if (pToSave[k] !== undefined) fbData[k] = pToSave[k];
+  });
   if (fbData.image && fbData.image.length > 500) delete fbData.image;
   db.ref('data/ba_products/' + pToSave.id).set(fbData)
     .catch(function(e){ console.warn('FB saveProduct:', e); });
