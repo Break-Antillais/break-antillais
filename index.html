@@ -5927,7 +5927,7 @@ function showPromoSuccess(pts, code, totalPts) {
 }
 
 function adminClients(sort) {
-  sort = sort || 'inscription';
+  sort = sort || 'connexion';
   var allClients = getUsers().filter(function(u) {
     var r = u.role || 'client';
     return r === 'client' || r === '';
