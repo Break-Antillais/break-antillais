@@ -1658,6 +1658,7 @@ function doLogin() {
   user.lastLogin = new Date().toISOString();
   saveUser(user);
   db.ref('data/users/'+user.id+'/lastLogin').set(user.lastLogin);
+  sessionStorage.setItem('ba_login_done', '1');
   setCurrentUser(user, remember);
   closeModal('m-auth');
   updateHeaderAuth(); updateBadges();
@@ -8170,6 +8171,12 @@ function startCountdown() {
     var _initUser = getCurrentUser();
     if (_initUser && _initUser.role === 'client') {
       attachClientNotifListener(_initUser);
+      // Mettre à jour lastLogin si session persistante (pas de login explicite dans cette session)
+      if (!sessionStorage.getItem('ba_login_done')) {
+        _initUser.lastLogin = new Date().toISOString();
+        db.ref('data/users/' + _initUser.id + '/lastLogin').set(_initUser.lastLogin);
+        saveUser(_initUser);
+      }
     }
     // Restaurer le panier depuis localStorage
     try {
