@@ -5150,7 +5150,7 @@ function getProdFormData(){
   var soon = document.getElementById('pf-soon');
   var stockEl = document.getElementById('pf-stock');
   var stockAlertEl = document.getElementById('pf-stock-alert');
-  return {
+  var data = {
     name: n ? n.value.trim() : '',
     cat: c ? c.value : 'bokit',
     price: p ? (parseFloat(p.value)||0) : 0,
@@ -5160,9 +5160,13 @@ function getProdFormData(){
     featured: document.getElementById('pf-feat') ? document.getElementById('pf-feat').checked : false,
     stock: stockEl && stockEl.value!=='' ? parseInt(stockEl.value) : null,
     stockAlert: stockAlertEl && stockAlertEl.value!=='' ? parseInt(stockAlertEl.value) : 3,
-    allergens: Array.from(document.querySelectorAll('input[name="pf-allergen"]:checked')).map(function(el){return el.value;}),
-    noConfig: document.getElementById('pf-noconfig') ? document.getElementById('pf-noconfig').checked : undefined
+    allergens: Array.from(document.querySelectorAll('input[name="pf-allergen"]:checked')).map(function(el){return el.value;})
   };
+  var noConfigEl = document.getElementById('pf-noconfig');
+  if (noConfigEl) data.noConfig = noConfigEl.checked;
+  // Supprimer toutes les valeurs undefined ou null inutiles
+  Object.keys(data).forEach(function(k){ if (data[k] === undefined) delete data[k]; });
+  return data;
 }
 function saveNewProd(){
   var d=getProdFormData();
