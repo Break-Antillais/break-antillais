@@ -1233,13 +1233,11 @@ function saveProduct(p) {
     pToSave.image = '__firebase__' + p.id;
     pToSave._imageRef = p.id;
   }
-  // Sync Firebase complet
+  // Sync Firebase complet du produit
   var fbData = Object.assign({}, pToSave);
-  delete fbData.image; // image séparée
-  db.ref('data/ba_products/' + pToSave.id).update({
-    stock: pToSave.stock !== undefined ? pToSave.stock : null,
-    ok: pToSave.ok
-  }).catch(function(e){ console.warn('FB saveProduct:', e); });
+  if (fbData.image && fbData.image.length > 500) delete fbData.image;
+  db.ref('data/ba_products/' + pToSave.id).set(fbData)
+    .catch(function(e){ console.warn('FB saveProduct:', e); });
   var saved = load('ba_products', null);
   if (!saved) saved = DEFAULT_PRODUCTS.slice();
   if (!Array.isArray(saved)) saved = Object.values(saved).filter(function(p){ return p && p.id; });
@@ -5172,26 +5170,33 @@ function saveNewProd(){
   document.getElementById('admin-content').innerHTML=adminProducts();
 }
 function saveEditProd(id){
-  var p=getProducts().find(function(x){return x.id===id;});
-  if(p){
-    var d=getProdFormData();
-    var oldImage = p.image;
-    var oldImageRef = p._imageRef;
-    Object.assign(p,d);
-    if(_newImg) { p.image=_newImg; } else { p.image=oldImage; if(oldImageRef) p._imageRef=oldImageRef; }
-    saveProduct(p);
-    // Fermer immédiatement
-    _newImg = null;
-    closeModal('m-product');
-    toast('Produit modifié !', 'success');
-    document.getElementById('admin-content').innerHTML = adminProducts();
-    // Propagation agoulou en arrière-plan (async)
-    if (p.cat === 'agoulou') {
-      setAgoulouStock(p.stock, p.ok);
+  try {
+    var p=getProducts().find(function(x){return x.id===id;});
+    if(p){
+      var d=getProdFormData();
+      var oldImage = p.image;
+      var oldImageRef = p._imageRef;
+      Object.assign(p,d);
+      if(_newImg) { p.image=_newImg; } else { p.image=oldImage; if(oldImageRef) p._imageRef=oldImageRef; }
+      saveProduct(p);
+      _newImg = null;
+      closeModal('m-product');
+      toast('Produit modifié !', 'success');
+      var ac = document.getElementById('admin-content');
+      if (ac) ac.innerHTML = adminProducts();
+      if (p.cat === 'agoulou') {
+        setTimeout(function(){ setAgoulouStock(p.stock, p.ok); }, 100);
+      }
+    } else {
+      _newImg = null;
+      closeModal('m-product');
+      toast('Produit introuvable', 'error');
     }
-  } else {
+  } catch(e) {
+    console.error('[saveEditProd] Erreur:', e.message, e.stack);
     _newImg = null;
     closeModal('m-product');
+    toast('Erreur lors de la sauvegarde: ' + e.message, 'error', 5000);
   }
 }
 function deleteProd(id){
