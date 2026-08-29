@@ -3011,6 +3011,29 @@ function computeOrderNumber() {
   return String(maxN + 1).padStart(4, '0');
 }
 
+// Verifie qu'une date de retrait est bien ouverte a la commande.
+// Renvoie null si OK, sinon un message d'erreur. Utilise pour empecher une
+// commande sur un jour ferme / non travaille / apres l'heure limite, meme si le
+// client avait deja un creneau selectionne avant la mise en place de la fermeture.
+function checkDateClosedReason(dateStr, cfg) {
+  cfg = cfg || getCfg();
+  var closedDates = cfg.closedDates || [];
+  var hit = closedDates.find(function(c){ return c && c.date === dateStr; });
+  if (hit) return 'Nous sommes exceptionnellement fermés ce jour-là' + (hit.msg ? ' ('+hit.msg+')' : '') + '. Merci de choisir une autre date.';
+  var d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  var openDays = cfg.openDays || [2,3,4,5,6];
+  if (openDays.indexOf(d.getDay()) < 0) return 'Nous sommes fermés ce jour-là. Merci de choisir un autre jour.';
+  // Si le retrait est aujourd'hui, verifier l'heure limite de commande
+  var todayStr = new Date().toISOString().split('T')[0];
+  if (dateStr === todayStr && cfg.cutoff) {
+    var cp = cfg.cutoff.split(':');
+    var cutoff = new Date(); cutoff.setHours(+cp[0], +cp[1], 0, 0);
+    if (new Date() >= cutoff) return 'Les commandes du jour sont clôturées (limite ' + cfg.cutoff + '). Choisissez une autre date.';
+  }
+  return null;
+}
+
 function confirmOrder(){
   var confirmBtn = document.getElementById('confirm-btn');
   if (confirmBtn && confirmBtn._loading) return;
@@ -3021,6 +3044,48 @@ function confirmOrder(){
 
   // Vérif stock Firebase AVANT de bloquer le bouton
   db.ref('data/ba_products').once('value').then(function(snapProds){
+    // Recharger config fraiche + commandes depuis Firebase.
+    var _pickupDate = window._selectedDate || new Date().toISOString().split('T')[0];
+    return db.ref('data/ba_cfg').once('value').then(function(snapCfg){
+      // Barriere fermeture : re-verifier avec la config a jour (pas le cache).
+      // Empeche une commande sur un jour ferme meme si le client avait deja un
+      // creneau selectionne avant la mise en place de la fermeture.
+      try {
+        var vc = snapCfg.val();
+        if (vc && typeof vc === 'object' && Object.keys(vc).length) {
+          try { localStorage.setItem('_ba_ba_cfg', JSON.stringify(vc)); } catch(e) {}
+        }
+        var freshCfg = getCfg();
+        var closedReason = checkDateClosedReason(_pickupDate, freshCfg);
+        if (closedReason) {
+          updateBadges();
+          showStockAlert(closedReason);
+          throw {_baHandled:true};
+        }
+      } catch(e) { if (e && e._baHandled) throw e; }
+      return db.ref('data/ba_orders').once('value');
+    }).then(function(snapOrders){
+      try {
+        var vo = snapOrders.val();
+        if (vo && typeof vo === 'object') {
+          var freshOrders = Array.isArray(vo) ? vo : Object.values(vo).filter(function(x){ return x && x.id; });
+          if (freshOrders.length) {
+            var existingStr = localStorage.getItem('_ba_ba_orders');
+            var existing = existingStr ? JSON.parse(existingStr) : [];
+            if (!Array.isArray(existing)) existing = Object.values(existing||{}).filter(function(x){return x&&x.id;});
+            var merged = existing.slice();
+            freshOrders.forEach(function(o){
+              var i = merged.findIndex(function(x){ return x && x.id === o.id; });
+              if (i >= 0) merged[i] = o; else merged.push(o);
+            });
+            localStorage.setItem('_ba_ba_orders', JSON.stringify(merged));
+          }
+        }
+      } catch(e) { console.warn('[BA] reload commandes:', e); }
+      return snapProds;
+    });
+  }).then(function(snapProds){
+    if (!snapProds) return; // barriere fermeture a interrompu le flux
     var freshProds = snapProds.val();
     if (freshProds) {
       var freshArr = Array.isArray(freshProds) ? freshProds : Object.values(freshProds).filter(function(x){return x&&x.id;});
@@ -3062,7 +3127,11 @@ function confirmOrder(){
     }, 8000);
     _doConfirmOrder(confirmBtn, safetyTimer);
   }).catch(function(e){
+    if (e && e._baHandled) { btnReset(confirmBtn); if(confirmBtn) confirmBtn._loading=false; return; }
     console.log('[BA] Etape 0 : Firebase inaccessible, on continue', e);
+    // Filet de securite hors-ligne : verifier la fermeture avec le cache local
+    var closedReason = checkDateClosedReason(window._selectedDate || new Date().toISOString().split('T')[0]);
+    if (closedReason) { updateBadges(); showStockAlert(closedReason); return; }
     btnLoading(confirmBtn, '⏳ Validation...');
     confirmBtn && (confirmBtn._loading = true);
     var safetyTimer = setTimeout(function(){
