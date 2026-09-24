@@ -1128,7 +1128,8 @@ var DEFAULT_PRODUCTS = [
   {id:'mb4',cat:'mini_bokit',name:'Box 40+ Mini Bokit',price:0,desc:'Commande speciale — contactez-nous directement',ok:true,boxType:'box40',maxSaveurs:5,qty:40,contactOnly:true},
   {id:'e1',cat:'enfant',name:'Menu Enfant Bokit',price:5.00,desc:'1 mini bokit + 1 boisson',ok:true},
   {id:'e2',cat:'enfant',name:'Menu Enfant Crepe',price:4.50,desc:'1 crepe sucree + 1 boisson',ok:true},
-  {id:'ea1',cat:'enfant_agoulou',name:'Menu Enfant Agoulou',price:7.00,desc:'1 agoulou enfant + 1 boisson',ok:false,stock:null,stockAlert:3}
+  {id:'ea1',cat:'enfant_agoulou',name:'Menu Enfant Agoulou',price:7.00,desc:'1 agoulou enfant + 1 boisson',ok:false,stock:null,stockAlert:3},
+  {id:'ma1',cat:'agoulou',name:'Menu Mini Agoulou',price:14.00,desc:'2 mini agoulou + 1 boisson au choix — chaque agoulou avec sa viande et sa sauce',ok:true,isMiniAgoulouMenu:true}
 ];
 
 var DEFAULT_CFG = {
@@ -2307,7 +2308,139 @@ function openProduct(id) {
     m2.style.display = 'block';
     return;
   }
+  // Menu Mini Agoulou → modal sur mesure
+  if (p.isMiniAgoulouMenu) { openMenuMiniAgoulou(p); return; }
   continueOpenProduct(id);
+}
+
+// ===== MENU MINI AGOULOU — modal sur mesure =====
+var _mmaConfig = { a1:{meat:'',sauce:''}, a2:{meat:'',sauce:''}, drink:'' };
+
+function openMenuMiniAgoulou(p) {
+  _mmaConfig = { a1:{meat:'',sauce:''}, a2:{meat:'',sauce:''}, drink:'' };
+  pendingProd = p;
+  var meats = getMeats('agoulou').filter(function(m){ return m.ok; });
+  var sauces = getSauces();
+  var drinks = getProducts().filter(function(x){ return x.cat==='boisson' && x.ok && (x.stock===null||x.stock===undefined||x.stock>0); });
+
+  function chipsViande(idx) {
+    var html = '<div class="chips" id="mma-meat-'+idx+'">';
+    meats.forEach(function(m){
+      html += '<button class="chip" data-v="'+m.name+'" onclick="mmaPickMeat(\''+idx+'\',this)">'+m.name+'</button>';
+    });
+    html += '</div>';
+    return html;
+  }
+  function chipsSauce(idx) {
+    var html = '<div class="chips" id="mma-sauce-'+idx+'">';
+    sauces.forEach(function(s){
+      html += '<button class="chip" data-v="'+s+'" onclick="mmaPickSauce(\''+idx+'\',this)">'+s+'</button>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  var html = '<div class="modal-overlay" onclick="if(event.target===this)closeModal(\'m-product\')">'
+    +'<div class="modal">'
+    +'<div class="modal-handle"></div>'
+    +'<h2 class="modal-title">🌯 '+p.name+'</h2>'
+    +'<div class="text-sm text-muted mb-3" style="line-height:1.5">'+p.desc+'</div>'
+
+    // ── Agoulou 1
+    +'<div style="background:var(--dark3);border:1px solid var(--border-red);border-radius:12px;padding:.85rem 1rem;margin-bottom:.75rem">'
+    +'<div style="font-family:var(--head);font-weight:800;font-size:.88rem;color:var(--red);margin-bottom:.6rem">🌯 Mini Agoulou #1</div>'
+    +'<div class="form-group"><label class="form-label">🥩 Viande <span id="mma-meat-lbl-a1" style="color:var(--gold);font-size:.75rem"></span></label>'+chipsViande('a1')+'</div>'
+    +'<div class="form-group"><label class="form-label">🥫 Sauce <span id="mma-sauce-lbl-a1" style="color:var(--gold);font-size:.75rem"></span></label>'+chipsSauce('a1')+'</div>'
+    +'</div>'
+
+    // ── Agoulou 2
+    +'<div style="background:var(--dark3);border:1px solid var(--border-red);border-radius:12px;padding:.85rem 1rem;margin-bottom:.75rem">'
+    +'<div style="font-family:var(--head);font-weight:800;font-size:.88rem;color:var(--red);margin-bottom:.6rem">🌯 Mini Agoulou #2</div>'
+    +'<div class="form-group"><label class="form-label">🥩 Viande <span id="mma-meat-lbl-a2" style="color:var(--gold);font-size:.75rem"></span></label>'+chipsViande('a2')+'</div>'
+    +'<div class="form-group"><label class="form-label">🥫 Sauce <span id="mma-sauce-lbl-a2" style="color:var(--gold);font-size:.75rem"></span></label>'+chipsSauce('a2')+'</div>'
+    +'</div>'
+
+    // ── Boisson
+    +'<div class="form-group"><label class="form-label">🥤 Boisson au choix</label>'
+    +'<div class="chips" id="mma-drink-chips">';
+  drinks.forEach(function(d){
+    var stockInfo = (d.stock!==null&&d.stock!==undefined) ? ' ('+d.stock+')' : '';
+    html += '<button class="chip" data-vid="'+d.id+'" data-v="'+d.name+'" onclick="mmaPickDrink(this)">'+d.name+stockInfo+'</button>';
+  });
+  if (drinks.length === 0) html += '<div class="text-sm text-muted">Aucune boisson disponible</div>';
+  html += '</div></div>'
+
+    // ── Note
+    +'<div class="form-group"><label class="form-label">📝 Note cuisine (optionnel)</label>'
+    +'<input class="form-input" id="mma-note" placeholder="Ex: sans oignon, extra sauce..."/></div>'
+
+    // ── Prix + bouton
+    +'<div style="display:flex;align-items:center;gap:.75rem;margin-top:.75rem">'
+    +'<div style="font-family:var(--head);font-weight:800;font-size:1.2rem;color:var(--gold);background:var(--dark3);border:1.5px solid rgba(212,175,55,.25);border-radius:var(--radius-sm);padding:.65rem .9rem;white-space:nowrap">'+fmt(p.price||0)+'</div>'
+    +'<button class="btn btn-primary" style="flex:1" onclick="mmaAddToCart()">🛒 Ajouter au panier</button>'
+    +'</div>'
+    +'</div></div>';
+
+  var m = document.getElementById('m-product');
+  m.innerHTML = html;
+  m.style.display = 'block';
+  fitMainNoScrollModal();
+}
+
+function mmaPickMeat(idx, btn) {
+  var wrap = document.getElementById('mma-meat-'+idx);
+  wrap.querySelectorAll('.chip').forEach(function(c){ c.classList.remove('on'); });
+  btn.classList.add('on');
+  _mmaConfig[idx].meat = btn.dataset.v;
+  var lbl = document.getElementById('mma-meat-lbl-'+idx);
+  if (lbl) lbl.textContent = '— ' + btn.dataset.v;
+}
+function mmaPickSauce(idx, btn) {
+  var wrap = document.getElementById('mma-sauce-'+idx);
+  wrap.querySelectorAll('.chip').forEach(function(c){ c.classList.remove('on'); });
+  btn.classList.add('on');
+  _mmaConfig[idx].sauce = btn.dataset.v;
+  var lbl = document.getElementById('mma-sauce-lbl-'+idx);
+  if (lbl) lbl.textContent = '— ' + btn.dataset.v;
+}
+function mmaPickDrink(btn) {
+  document.querySelectorAll('#mma-drink-chips .chip').forEach(function(c){ c.classList.remove('on'); });
+  btn.classList.add('on');
+  _mmaConfig.drink = btn.dataset.vid;
+  _mmaConfig.drinkName = btn.dataset.v;
+}
+function mmaAddToCart() {
+  if (!_mmaConfig.a1.meat) { toast('Choisissez la viande du mini agoulou #1','warning'); return; }
+  if (!_mmaConfig.a1.sauce) { toast('Choisissez la sauce du mini agoulou #1','warning'); return; }
+  if (!_mmaConfig.a2.meat) { toast('Choisissez la viande du mini agoulou #2','warning'); return; }
+  if (!_mmaConfig.a2.sauce) { toast('Choisissez la sauce du mini agoulou #2','warning'); return; }
+  if (!_mmaConfig.drink) { toast('Choisissez votre boisson','warning'); return; }
+  var p = pendingProd;
+  var note = (document.getElementById('mma-note')||{}).value || '';
+  var details = [
+    'Agoulou #1: '+_mmaConfig.a1.meat+' / '+_mmaConfig.a1.sauce,
+    'Agoulou #2: '+_mmaConfig.a2.meat+' / '+_mmaConfig.a2.sauce,
+    'Boisson: '+(_mmaConfig.drinkName||''),
+  ];
+  if (note) details.push('Note: '+note);
+  cart.push({
+    id: p.id, pid: p.id, name: p.name, price: p.price||0, qty: 1,
+    details: details.join(' | '),
+    detailsArr: details,
+    mmaConfig: JSON.parse(JSON.stringify(_mmaConfig))
+  });
+  try { localStorage.setItem('_ba_cart', JSON.stringify(cart)); } catch(e){}
+  closeModal('m-product');
+  updateCartBadge();
+  toast('Ajouté au panier 🛒','success');
+  // Décrémenter stock boisson
+  var drinkProd = getProducts().find(function(x){ return x.id===_mmaConfig.drink; });
+  if (drinkProd && drinkProd.stock !== null && drinkProd.stock !== undefined) {
+    drinkProd.stock = Math.max(0, drinkProd.stock - 1);
+    if (drinkProd.stock === 0) drinkProd.ok = false;
+    saveProduct(drinkProd);
+    db.ref('data/ba_products/'+drinkProd.id).update({stock:drinkProd.stock, ok:drinkProd.ok});
+  }
 }
 
 function continueOpenProduct(id) {
