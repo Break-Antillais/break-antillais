@@ -2552,6 +2552,8 @@ function getMeatCount(p) {
   // Menu enfant agoulou et enfant bokit : 1 viande
   if (p.cat === 'enfant_agoulou') return 1;
   if (p.cat === 'enfant') return 1;
+  // Champ explicite défini par l'admin (prioritaire)
+  if (p.meatCount !== undefined && p.meatCount !== null) return parseInt(p.meatCount)||0;
   var n=p.name.toLowerCase();
   if(n.includes('4 viande'))return 4;
   if(n.includes('3 viande'))return 3;
@@ -3224,6 +3226,17 @@ function _doConfirmOrder(confirmBtn, safetyTimer) {
         if (groupQty[p.cat] !== undefined) {
           // Stock partage : on cumule, la deduction se fait apres
           groupQty[p.cat] += (item.qty||1);
+        } else if (p.stockLinkedTo) {
+          // Stock rattaché à un autre produit : décrémenter le produit source
+          var srcProd = prods.find(function(x){ return x.id===p.stockLinkedTo; });
+          if (srcProd && srcProd.stock !== null && srcProd.stock !== undefined) {
+            var qty = item.qty||1;
+            srcProd.stock = Math.max(0, srcProd.stock - qty);
+            if (srcProd.stock === 0) srcProd.ok = false;
+            saveProduct(srcProd);
+            db.ref('data/ba_products/'+srcProd.id).update({stock:srcProd.stock, ok:srcProd.ok});
+            changed = true;
+          }
         } else if (p.stock !== null && p.stock !== undefined) {
           var qty = item.qty||1;
           p.stock = Math.max(0, p.stock - qty);
@@ -5544,6 +5557,11 @@ function onProdDrinkToggle() {
   var wrap = document.getElementById('pf-drink-wrap');
   if (wrap) wrap.style.display = (cb && cb.checked) ? 'block' : 'none';
 }
+function onProdStockLinkToggle() {
+  var cb = document.getElementById('pf-stocklink-toggle');
+  var wrap = document.getElementById('pf-stocklink-wrap');
+  if (wrap) wrap.style.display = (cb && cb.checked) ? 'block' : 'none';
+}
 function prodForm(p){
   p=p||{};
   var cats=['bokit','agoulou','crepe_salee','crepe_sucree','mini_bokit','enfant','enfant_agoulou','boisson'];
@@ -5581,8 +5599,14 @@ function prodForm(p){
   if (meatCats.indexOf(p.cat||'bokit') >= 0 && !p.isClassique) {
     var allMeats = getMeats ? getMeats('all') : (load('ba_meats', DEFAULT_MEATS)||[]);
     var pMeats = p.allowedMeats; // undefined = toutes autorisées, array = liste restreinte
-    html += '<div class="form-group"><label class="form-label">🥩 Viandes proposées aux clients</label>';
-    html += '<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Décochez pour masquer une viande sur ce produit spécifiquement</div>';
+    var pMeatCount = (p.meatCount !== undefined && p.meatCount !== null) ? p.meatCount : '';
+    html += '<div class="form-group"><label class="form-label">🥩 Nombre de viandes au choix</label>';
+    html += '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem">';
+    html += '<input class="form-input" id="pf-meatcount" type="number" min="0" max="4" value="'+pMeatCount+'" placeholder="0 = pas de viande" style="max-width:160px"/>';
+    html += '<span style="font-size:.75rem;color:var(--muted)">Le client devra en choisir ce nombre</span>';
+    html += '</div>';
+    html += '<label class="form-label" style="margin-bottom:.3rem">🥩 Viandes proposées aux clients</label>';
+    html += '<div style="font-size:.75rem;color:var(--muted);margin-bottom:.4rem">Décochez pour masquer une viande sur ce produit</div>';
     html += '<div style="display:flex;flex-wrap:wrap;gap:.35rem" id="pf-meats-wrap">';
     allMeats.forEach(function(m){
       var isAllowed = !pMeats || pMeats.indexOf(m.name) >= 0;
@@ -5595,7 +5619,10 @@ function prodForm(p){
   // ===== BOISSON INCLUSE =====
   var drinkCats = ['bokit','agoulou','crepe_salee','enfant','enfant_agoulou','mini_bokit'];
   if (drinkCats.indexOf(p.cat||'bokit') >= 0) {
-    var allDrinks = (getProducts ? getProducts() : []).filter(function(x){return x.cat==='boisson' && x.ok;});
+    // Filtrer : boissons dispo (ok) ET stock > 0 (ou stock non géré = null)
+    var allDrinks = (getProducts ? getProducts() : []).filter(function(x){
+      return x.cat==='boisson' && x.ok && (x.stock === null || x.stock === undefined || x.stock > 0);
+    });
     var hasDrink = p.includedDrink ? true : false;
     html += '<div class="form-group"><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">'
       +'<input type="checkbox" id="pf-drink-toggle" style="accent-color:var(--red)" onchange="onProdDrinkToggle()"'+(hasDrink?' checked':'')+'>'
@@ -5603,12 +5630,41 @@ function prodForm(p){
       +'<div id="pf-drink-wrap" style="display:'+(hasDrink?'block':'none')+';margin-top:-.25rem;margin-bottom:.5rem">'
       +'<select class="form-select" id="pf-drink-id">';
     if (allDrinks.length === 0) {
-      html += '<option value="">-- Aucune boisson disponible --</option>';
+      html += '<option value="">-- Aucune boisson en stock --</option>';
     } else {
       html += '<option value="">-- Choisir une boisson --</option>';
       allDrinks.forEach(function(d){
+        var stockInfo = (d.stock !== null && d.stock !== undefined) ? ' ('+d.stock+' en stock)' : '';
         var sel = p.includedDrink && p.includedDrink===d.id ? ' selected' : '';
-        html += '<option value="'+d.id+'"'+sel+'>'+d.name+'</option>';
+        html += '<option value="'+d.id+'"'+sel+'>'+d.name+stockInfo+'</option>';
+      });
+    }
+    html += '</select>'
+      +'<div style="font-size:.75rem;color:var(--muted);margin-top:.3rem">Seules les boissons disponibles en stock sont affichées</div>'
+      +'</div>';
+  }
+
+  // ===== STOCK LIÉ =====
+  var stockLinkCats = ['bokit','agoulou','crepe_salee','enfant','enfant_agoulou','mini_bokit','crepe_sucree'];
+  if (stockLinkCats.indexOf(p.cat||'bokit') >= 0) {
+    // Produits avec stock géré (boissons et autres) — pas de stock partagé par catégorie
+    var stockProds = (getProducts ? getProducts() : []).filter(function(x){
+      return x.stock !== null && x.stock !== undefined && !SHARED_STOCK_CATS[x.cat] && x.id !== p.id;
+    });
+    var hasLink = p.stockLinkedTo ? true : false;
+    html += '<div class="form-group"><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">'
+      +'<input type="checkbox" id="pf-stocklink-toggle" style="accent-color:var(--gold)" onchange="onProdStockLinkToggle()"'+(hasLink?' checked':'')+'>'
+      +' 📦 Rattacher le stock à un autre produit</label>'
+      +'<div style="font-size:.75rem;color:var(--muted);margin-top:.2rem">Le stock de ce produit suivra celui du produit sélectionné</div></div>'
+      +'<div id="pf-stocklink-wrap" style="display:'+(hasLink?'block':'none')+';margin-top:-.25rem;margin-bottom:.5rem">'
+      +'<select class="form-select" id="pf-stocklink-id">';
+    if (stockProds.length === 0) {
+      html += '<option value="">-- Aucun produit avec stock défini --</option>';
+    } else {
+      html += '<option value="">-- Choisir un produit --</option>';
+      stockProds.forEach(function(x){
+        var sel = p.stockLinkedTo && p.stockLinkedTo===x.id ? ' selected' : '';
+        html += '<option value="'+x.id+'"'+sel+'>'+x.name+' (stock: '+(x.stock||0)+')</option>';
       });
     }
     html += '</select></div>';
@@ -5718,6 +5774,12 @@ function getProdFormData(){
   var noConfigEl = document.getElementById('pf-noconfig');
   if (noConfigEl) data.noConfig = noConfigEl.checked;
 
+  // Nombre de viandes au choix
+  var meatCountEl = document.getElementById('pf-meatcount');
+  if (meatCountEl) {
+    data.meatCount = meatCountEl.value !== '' ? parseInt(meatCountEl.value) : null;
+  }
+
   // Viandes autorisées
   var meatChecks = document.querySelectorAll('input[name="pf-meat"]');
   if (meatChecks.length > 0) {
@@ -5737,6 +5799,17 @@ function getProdFormData(){
       data.includedDrink = drinkSel ? (drinkSel.value || null) : null;
     } else {
       data.includedDrink = null;
+    }
+  }
+
+  // Stock rattaché à un autre produit
+  var stockLinkToggle = document.getElementById('pf-stocklink-toggle');
+  if (stockLinkToggle) {
+    if (stockLinkToggle.checked) {
+      var stockLinkSel = document.getElementById('pf-stocklink-id');
+      data.stockLinkedTo = stockLinkSel ? (stockLinkSel.value || null) : null;
+    } else {
+      data.stockLinkedTo = null;
     }
   }
 
