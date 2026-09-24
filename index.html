@@ -1205,14 +1205,29 @@ function getProducts() {
   var result = saved.filter(function(p){ return deleted.indexOf(p.id) < 0; });
   // Forcer les flags spéciaux depuis DEFAULT_PRODUCTS (ne pas dépendre de Firebase pour ça)
   var SPECIAL_FLAGS = {isMiniAgoulouMenu:true, isClassique:true, contactOnly:true};
+  // Produits dont on force TOUJOURS les champs essentiels depuis DEFAULT (même si Firebase a des valeurs différentes)
+  var FORCE_FROM_DEFAULT = ['ma1'];
   result.forEach(function(p){
     var def = DEFAULT_PRODUCTS.find(function(d){ return d.id === p.id; });
     if (def) {
-      Object.keys(SPECIAL_FLAGS).forEach(function(flag){
-        if (def[flag]) p[flag] = def[flag];
-      });
+      // Pour les produits spéciaux, forcer tous les champs essentiels depuis DEFAULT
+      if (FORCE_FROM_DEFAULT.indexOf(p.id) >= 0) {
+        ['name','price','desc','ok','cat','isMiniAgoulouMenu'].forEach(function(field){
+          if (def[field] !== undefined) p[field] = def[field];
+        });
+      } else {
+        // Pour les autres, uniquement forcer les flags spéciaux
+        Object.keys(SPECIAL_FLAGS).forEach(function(flag){
+          if (def[flag]) p[flag] = def[flag];
+        });
+      }
     }
   });
+  // Si ma1 n'existe pas encore dans result, l'ajouter depuis DEFAULT
+  if (!result.find(function(p){ return p.id === 'ma1'; })) {
+    var ma1def = DEFAULT_PRODUCTS.find(function(d){ return d.id === 'ma1'; });
+    if (ma1def) result.push(ma1def);
+  }
   return result;
 }
 function getCfg() {
