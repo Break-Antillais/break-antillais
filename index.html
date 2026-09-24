@@ -2442,7 +2442,7 @@ function continueOpenProduct(id) {
       +'<input class="form-input" id="prod-note" placeholder="Ex: sans oignon, extra sauce..."/></div>';
   }
 
-    +'<div style="display:flex;align-items:center;gap:.75rem;margin-top:.75rem">'
+  html += '<div style="display:flex;align-items:center;gap:.75rem;margin-top:.75rem">'
     +'<div style="font-family:var(--head);font-weight:800;font-size:1.2rem;color:var(--gold);background:var(--dark3);border:1.5px solid rgba(212,175,55,.25);border-radius:var(--radius-sm);padding:.65rem .9rem;white-space:nowrap" id="cart-btn-price">'+(p.isClassique?'—':fmt(p.price||0))+'</div>'
     +'<div style="display:flex;align-items:center;gap:.5rem">'
     +'<button style="width:32px;height:32px;border-radius:50%;background:var(--dark4);border:1.5px solid var(--border);color:var(--text);font-size:1.2rem;cursor:pointer;flex-shrink:0" onclick="changeQty(-1)">−</button>'
