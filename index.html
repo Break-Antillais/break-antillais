@@ -2364,8 +2364,7 @@ function openMenuMiniAgoulou(p) {
     +'<div class="form-group"><label class="form-label">🥤 Boisson au choix</label>'
     +'<div class="chips" id="mma-drink-chips">';
   drinks.forEach(function(d){
-    var stockInfo = (d.stock!==null&&d.stock!==undefined) ? ' ('+d.stock+')' : '';
-    html += '<button class="chip" data-vid="'+d.id+'" data-v="'+d.name+'" onclick="mmaPickDrink(this)">'+d.name+stockInfo+'</button>';
+    html += '<button class="chip" data-vid="'+d.id+'" data-v="'+d.name+'" onclick="mmaPickDrink(this)">'+d.name+'</button>';
   });
   if (drinks.length === 0) html += '<div class="text-sm text-muted">Aucune boisson disponible</div>';
   html += '</div></div>'
