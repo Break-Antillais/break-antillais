@@ -1202,7 +1202,18 @@ function getProducts() {
     return merged;
   }
   // Filter out any deleted that snuck back in
-  return saved.filter(function(p){ return deleted.indexOf(p.id) < 0; });
+  var result = saved.filter(function(p){ return deleted.indexOf(p.id) < 0; });
+  // Forcer les flags spéciaux depuis DEFAULT_PRODUCTS (ne pas dépendre de Firebase pour ça)
+  var SPECIAL_FLAGS = {isMiniAgoulouMenu:true, isClassique:true, contactOnly:true};
+  result.forEach(function(p){
+    var def = DEFAULT_PRODUCTS.find(function(d){ return d.id === p.id; });
+    if (def) {
+      Object.keys(SPECIAL_FLAGS).forEach(function(flag){
+        if (def[flag]) p[flag] = def[flag];
+      });
+    }
+  });
+  return result;
 }
 function getCfg() {
   var stored = load('ba_cfg', {});
