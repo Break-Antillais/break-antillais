@@ -2394,7 +2394,9 @@ function continueOpenProduct(id) {
       html += '<div class="form-group"><label class="form-label">🥩 '+(mc>1?mc+' viandes':'Viande')+' au choix</label><div class="chips" id="meat-chips">';
       // Pour Menu Enfant Bokit → Morue autorisée, sinon non
       var _meatCat = (p.cat==='enfant' && p.name.toLowerCase().indexOf('bokit')>=0) ? 'enfant_bokit' : p.cat;
+      var _allowedMeats = p.allowedMeats || null; // null = toutes autorisées
       getMeats(_meatCat).forEach(function(m){
+        if (_allowedMeats && _allowedMeats.indexOf(m.name) < 0) return; // filtrée par admin
         var unavail = !m.ok;
         html += '<button class="chip" data-v="'+m.name+'"'
           +(unavail?' disabled style="opacity:.4;cursor:not-allowed;pointer-events:none"':' onclick="toggleMeat(this,'+mc+')"')+'>'
@@ -2424,8 +2426,21 @@ function continueOpenProduct(id) {
     html += '</div></div>';
   }
 
-  html += '<div class="form-group mt-1"><label class="form-label">📝 Note cuisine (optionnel)</label>'
-    +'<input class="form-input" id="prod-note" placeholder="Ex: sans oignon, extra sauce..."/></div>'
+  // Boisson incluse dans le menu
+  if (p.includedDrink) {
+    var drinkProd = getProducts().find(function(x){return x.id===p.includedDrink;});
+    if (drinkProd) {
+      html += '<div style="background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.2);border-radius:10px;padding:.55rem .75rem;margin-top:.5rem;display:flex;align-items:center;gap:.5rem">'
+        +'<span style="font-size:1.1rem">🥤</span>'
+        +'<span style="font-size:.82rem;font-weight:600;color:var(--gold)">Boisson incluse : <span style="color:var(--text)">'+drinkProd.name+'</span></span>'
+        +'</div>';
+    }
+  }
+  // Note cuisine (conditionnée à allowNote du produit, true par défaut)
+  if (p.allowNote !== false) {
+    html += '<div class="form-group mt-1"><label class="form-label">📝 Note cuisine (optionnel)</label>'
+      +'<input class="form-input" id="prod-note" placeholder="Ex: sans oignon, extra sauce..."/></div>';
+  }
 
     +'<div style="display:flex;align-items:center;gap:.75rem;margin-top:.75rem">'
     +'<div style="font-family:var(--head);font-weight:800;font-size:1.2rem;color:var(--gold);background:var(--dark3);border:1.5px solid rgba(212,175,55,.25);border-radius:var(--radius-sm);padding:.65rem .9rem;white-space:nowrap" id="cart-btn-price">'+(p.isClassique?'—':fmt(p.price||0))+'</div>'
@@ -5524,6 +5539,11 @@ function onProdCatChange() {
   var a = (curAlert && curAlert.value !== '') ? parseInt(curAlert.value,10) : 3;
   wrap.innerHTML = prodStockField(sel.value, v, a);
 }
+function onProdDrinkToggle() {
+  var cb = document.getElementById('pf-drink-toggle');
+  var wrap = document.getElementById('pf-drink-wrap');
+  if (wrap) wrap.style.display = (cb && cb.checked) ? 'block' : 'none';
+}
 function prodForm(p){
   p=p||{};
   var cats=['bokit','agoulou','crepe_salee','crepe_sucree','mini_bokit','enfant','enfant_agoulou','boisson'];
@@ -5556,6 +5576,51 @@ function prodForm(p){
       +'</div><div class="divider"></div>';
   }
 
+  // ===== VIANDES AUTORISEES (pour catégories avec viandes) =====
+  var meatCats = ['bokit','agoulou','crepe_salee','enfant','enfant_agoulou'];
+  if (meatCats.indexOf(p.cat||'bokit') >= 0 && !p.isClassique) {
+    var allMeats = getMeats ? getMeats('all') : (load('ba_meats', DEFAULT_MEATS)||[]);
+    var pMeats = p.allowedMeats; // undefined = toutes autorisées, array = liste restreinte
+    html += '<div class="form-group"><label class="form-label">🥩 Viandes proposées aux clients</label>';
+    html += '<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Décochez pour masquer une viande sur ce produit spécifiquement</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:.35rem" id="pf-meats-wrap">';
+    allMeats.forEach(function(m){
+      var isAllowed = !pMeats || pMeats.indexOf(m.name) >= 0;
+      html += '<label style="display:flex;align-items:center;gap:.25rem;cursor:pointer;font-size:.75rem;background:var(--dark4);padding:.25rem .6rem;border-radius:100px;border:1px solid '+(isAllowed?'var(--red)':'var(--border)')+';">'
+        +'<input type="checkbox" name="pf-meat" value="'+m.name+'"'+(isAllowed?' checked':'')+' style="accent-color:var(--red)"> '+m.name+'</label>';
+    });
+    html += '</div></div>';
+  }
+
+  // ===== BOISSON INCLUSE =====
+  var drinkCats = ['bokit','agoulou','crepe_salee','enfant','enfant_agoulou','mini_bokit'];
+  if (drinkCats.indexOf(p.cat||'bokit') >= 0) {
+    var allDrinks = (getProducts ? getProducts() : []).filter(function(x){return x.cat==='boisson' && x.ok;});
+    var hasDrink = p.includedDrink ? true : false;
+    html += '<div class="form-group"><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">'
+      +'<input type="checkbox" id="pf-drink-toggle" style="accent-color:var(--red)" onchange="onProdDrinkToggle()"'+(hasDrink?' checked':'')+'>'
+      +' 🥤 Boisson incluse dans ce menu</label></div>'
+      +'<div id="pf-drink-wrap" style="display:'+(hasDrink?'block':'none')+';margin-top:-.25rem;margin-bottom:.5rem">'
+      +'<select class="form-select" id="pf-drink-id">';
+    if (allDrinks.length === 0) {
+      html += '<option value="">-- Aucune boisson disponible --</option>';
+    } else {
+      html += '<option value="">-- Choisir une boisson --</option>';
+      allDrinks.forEach(function(d){
+        var sel = p.includedDrink && p.includedDrink===d.id ? ' selected' : '';
+        html += '<option value="'+d.id+'"'+sel+'>'+d.name+'</option>';
+      });
+    }
+    html += '</select></div>';
+  }
+
+  // ===== NOTE CLIENT =====
+  var allowNote = p.allowNote !== false; // true par défaut
+  html += '<div class="form-group"><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">'
+    +'<input type="checkbox" id="pf-allownote" style="accent-color:var(--red)"'+(allowNote?' checked':'')+'>'
+    +' 📝 Permettre au client d\'ajouter une note</label></div>';
+
+  // ===== ALLERGENES =====
   var ALLERGENS = ['Gluten','Oeufs','Lait','Soja','Fruits a coque','Arachides','Poisson'];
   var pAllergens = p.allergens || [];
   html += '<div class="form-group"><label class="form-label">Allergenes</label><div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem">';
@@ -5652,6 +5717,33 @@ function getProdFormData(){
   };
   var noConfigEl = document.getElementById('pf-noconfig');
   if (noConfigEl) data.noConfig = noConfigEl.checked;
+
+  // Viandes autorisées
+  var meatChecks = document.querySelectorAll('input[name="pf-meat"]');
+  if (meatChecks.length > 0) {
+    var allChecked = Array.from(meatChecks).every(function(el){return el.checked;});
+    if (allChecked) {
+      data.allowedMeats = null; // toutes autorisées = null (pas de restriction)
+    } else {
+      data.allowedMeats = Array.from(meatChecks).filter(function(el){return el.checked;}).map(function(el){return el.value;});
+    }
+  }
+
+  // Boisson incluse
+  var drinkToggle = document.getElementById('pf-drink-toggle');
+  if (drinkToggle) {
+    if (drinkToggle.checked) {
+      var drinkSel = document.getElementById('pf-drink-id');
+      data.includedDrink = drinkSel ? (drinkSel.value || null) : null;
+    } else {
+      data.includedDrink = null;
+    }
+  }
+
+  // Note client autorisée
+  var allowNoteEl = document.getElementById('pf-allownote');
+  data.allowNote = allowNoteEl ? allowNoteEl.checked : true;
+
   // Supprimer toutes les valeurs undefined ou null inutiles
   Object.keys(data).forEach(function(k){ if (data[k] === undefined) delete data[k]; });
   return data;
@@ -8362,8 +8454,21 @@ function showRewardConfig(productName, palierName, prod) {
     +'<div id="supp-total" style="font-size:.82rem;color:var(--gold);font-weight:700;margin-top:.35rem;display:none"></div>'
     +'</div>';
 
-  html += '<div class="form-group mt-1"><label class="form-label">📝 Note cuisine (optionnel)</label>'
-    +'<input class="form-input" id="prod-note" placeholder="Ex: sans oignon, extra sauce..."/></div>';
+  // Boisson incluse dans le menu
+  if (p.includedDrink) {
+    var drinkProd = getProducts().find(function(x){return x.id===p.includedDrink;});
+    if (drinkProd) {
+      html += '<div style="background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.2);border-radius:10px;padding:.55rem .75rem;margin-top:.5rem;display:flex;align-items:center;gap:.5rem">'
+        +'<span style="font-size:1.1rem">🥤</span>'
+        +'<span style="font-size:.82rem;font-weight:600;color:var(--gold)">Boisson incluse : <span style="color:var(--text)">'+drinkProd.name+'</span></span>'
+        +'</div>';
+    }
+  }
+  // Note cuisine (conditionnée à allowNote du produit, true par défaut)
+  if (p.allowNote !== false) {
+    html += '<div class="form-group mt-1"><label class="form-label">📝 Note cuisine (optionnel)</label>'
+      +'<input class="form-input" id="prod-note" placeholder="Ex: sans oignon, extra sauce..."/></div>';
+  };
 
   // Bottom bar
   var suppCost = 0;
